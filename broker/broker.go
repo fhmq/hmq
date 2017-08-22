@@ -44,10 +44,18 @@ func (b *Broker) StartListening() {
 func handleConnection(conn net.Conn) {
 
 	//process connect packet
-	connMsg, err := ReadPacket(conn)
+	buf, err := ReadPacket(conn)
 	if err != nil {
 		log.Error("read connect packet error: ", err)
 		return
 	}
+	connMsg, err := DecodeConnectMessage(buf)
+	if err != nil {
+		log.Error(err)
+		return
+	}
+}
+
+func (b *Broker) NewClient() {
 
 }
