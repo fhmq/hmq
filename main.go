@@ -8,6 +8,7 @@ import (
 	log "github.com/cihub/seelog"
 )
 
+//https://github.com/xiaojiaqi/10billionhongbaos
 func main() {
 	broker := broker.NewBroker()
 	broker.StartListening()
