@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"fhmq/lib/message"
 	"net"
 	"time"
 
@@ -20,6 +21,7 @@ func (b *Broker) StartListening() {
 		return
 	}
 	tmpDelay := 10 * ACCEPT_MIN_SLEEP
+	num := 0
 	for {
 		conn, err := l.Accept()
 		if err != nil {
@@ -37,11 +39,12 @@ func (b *Broker) StartListening() {
 			continue
 		}
 		tmpDelay = ACCEPT_MIN_SLEEP
-		go handleConnection(conn)
+		num += 1
+		go b.handleConnection(conn, num)
 	}
 }
 
-func handleConnection(conn net.Conn) {
+func (b *Broker) handleConnection(conn net.Conn, idx int) {
 
 	//process connect packet
 	buf, err := ReadPacket(conn)
@@ -54,8 +57,29 @@ func handleConnection(conn net.Conn) {
 		log.Error(err)
 		return
 	}
-}
-
-func (b *Broker) NewClient() {
-
+	willmsg := message.NewPublishMessage()
+	if connMsg.WillFlag() {
+		willmsg.SetQoS(connMsg.WillQos())
+		willmsg.SetPayload(connMsg.WillMessage())
+		willmsg.SetRetain(connMsg.WillRetain())
+		willmsg.SetTopic(connMsg.WillTopic())
+		willmsg.SetDup(false)
+	} else {
+		willmsg = nil
+	}
+	info := info{
+		clientID:  connMsg.ClientId(),
+		username:  connMsg.Username(),
+		password:  connMsg.Password(),
+		keepalive: connMsg.KeepAlive(),
+		willMsg:   willmsg,
+	}
+	c := &client{
+		broker:  b,
+		conn:    conn,
+		info:    info,
+		msgPool: MSGPool[idx%MessagePoolNum].GetPool(),
+	}
+	c.init()
+	c.readLoop()
 }
