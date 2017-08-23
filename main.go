@@ -8,36 +8,6 @@ import (
 	log "github.com/cihub/seelog"
 )
 
-const (
-	MaxUser               = 1024 * 1024
-	MessagePoolNum        = 1024
-	MessagePoolUser       = MaxUser / MessagePoolNum
-	MessagePoolMessageNum = MaxUser / MessagePoolNum * 4
-
-	MessageBoxNum           = 256
-	MessageBoxUserNum       = MaxUser / MessageBoxNum
-	MessageBoxMessageLength = MessageBoxUserNum
-)
-
-var (
-	MSGPool []MessagePool
-	// Messagebox []*Message
-)
-
-func init() {
-	MSGPool = make([]MessagePool, (MessagePoolNum + 2))
-	for i := 0; i < (MessagePoolNum + 2); i++ {
-		MSGPool[i].Init(MessagePoolUser, MessagePoolMessageNum)
-	}
-	// Messagebox = make([]MessageProcess, MailBoxNum)
-	// for i := 0; i < MailBoxNum; i++ {
-	// 	gMailbox[i].Init(MailBoxMessageLength, HongBaoBoxMessageLength)
-	// }
-	// for i := 0; i < MailBoxNum; i++ {
-	// 	go ProcessRequest(i)
-	// }
-
-}
 func main() {
 	broker := broker.NewBroker()
 	broker.StartListening()

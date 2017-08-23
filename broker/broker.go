@@ -73,14 +73,17 @@ func (b *Broker) handleConnection(conn net.Conn, idx int) {
 		keepalive: connMsg.KeepAlive(),
 		willMsg:   willmsg,
 	}
-	pool := MSGPool[idx%MessagePoolNum].GetPool()
+
 	c := &client{
-		broker:  b,
-		conn:    conn,
-		info:    info,
-		msgPool: pool,
+		broker: b,
+		conn:   conn,
+		info:   info,
 	}
 	c.init()
-	c.readLoop()
-	pool.Reduce()
+	c.woker = Worker{
+		WorkerPool: MyDispatcher,
+		MsgChannel: make(chan *Message),
+		quit:       make(chan bool),
+	}
+	c.readLoop(idx)
 }

@@ -5,8 +5,12 @@ import "sync"
 type Message struct {
 	client *client
 	msg    []byte
-	pool   *MessagePool
+	// pool   *MessagePool
 }
+
+var (
+	MSGPool []MessagePool
+)
 
 type MessagePool struct {
 	l       sync.Mutex
@@ -15,14 +19,17 @@ type MessagePool struct {
 	queue   chan *Message
 }
 
+func init() []MessagePool {
+	MSGPool = make([]MessagePool, (MessagePoolNum + 2))
+	for i := 0; i < (MessagePoolNum + 2); i++ {
+		MSGPool[i].Init(MessagePoolUser, MessagePoolMessageNum)
+	}
+	return MSGPool
+}
+
 func (p *MessagePool) Init(num int, maxusernum int) {
 	p.maxuser = maxusernum
 	p.queue = make(chan *Message, num)
-	for k := 0; k < num; k++ {
-		m := &Message{}
-		m.Pool = p
-		p.Push(m)
-	}
 }
 
 func (p *MessagePool) GetPool() *MessagePool {
