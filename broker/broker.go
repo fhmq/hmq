@@ -45,7 +45,6 @@ func (b *Broker) StartListening() {
 }
 
 func (b *Broker) handleConnection(conn net.Conn, idx int) {
-
 	//process connect packet
 	buf, err := ReadPacket(conn)
 	if err != nil {
@@ -74,12 +73,14 @@ func (b *Broker) handleConnection(conn net.Conn, idx int) {
 		keepalive: connMsg.KeepAlive(),
 		willMsg:   willmsg,
 	}
+	pool := MSGPool[idx%MessagePoolNum].GetPool()
 	c := &client{
 		broker:  b,
 		conn:    conn,
 		info:    info,
-		msgPool: MSGPool[idx%MessagePoolNum].GetPool(),
+		msgPool: pool,
 	}
 	c.init()
 	c.readLoop()
+	pool.Reduce()
 }
