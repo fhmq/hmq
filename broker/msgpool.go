@@ -5,7 +5,6 @@ import "sync"
 type Message struct {
 	client *client
 	msg    []byte
-	// pool   *MessagePool
 }
 
 var (
@@ -19,12 +18,11 @@ type MessagePool struct {
 	queue   chan *Message
 }
 
-func init() []MessagePool {
-	MSGPool = make([]MessagePool, (MessagePoolNum + 2))
-	for i := 0; i < (MessagePoolNum + 2); i++ {
+func InitMessagePool() {
+	MSGPool = make([]MessagePool, MessagePoolNum)
+	for i := 0; i < MessagePoolNum; i++ {
 		MSGPool[i].Init(MessagePoolUser, MessagePoolMessageNum)
 	}
-	return MSGPool
 }
 
 func (p *MessagePool) Init(num int, maxusernum int) {
@@ -50,15 +48,4 @@ func (p *MessagePool) Reduce() {
 	p.user -= 1
 	p.l.Unlock()
 
-}
-
-func (p *MessagePool) Pop() *Message {
-
-	p2 := <-p.queue
-	return p2
-}
-
-func (p *MessagePool) Push(pmessage *Message) {
-
-	p.queue <- pmessage
 }

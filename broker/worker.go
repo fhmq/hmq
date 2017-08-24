@@ -6,6 +6,13 @@ type Worker struct {
 	quit       chan bool
 }
 
+func NewWorker(workerPool chan chan *Message) Worker {
+	return Worker{
+		WorkerPool: workerPool,
+		MsgChannel: make(chan *Message),
+		quit:       make(chan bool)}
+}
+
 func (w Worker) Start() {
 	go func() {
 		for {
@@ -14,8 +21,8 @@ func (w Worker) Start() {
 			select {
 			case msg := <-w.MsgChannel:
 				// we have received a work request.
+				ProcessMessage(msg)
 			case <-w.quit:
-				// we have received a signal to stop
 				return
 			}
 		}

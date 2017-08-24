@@ -1,19 +1,11 @@
 package broker
 
 const (
-	WorkPoolNum           = 1024
+	WorkNum               = 2048
 	MaxUser               = 1024 * 1024
 	MessagePoolNum        = 1024
 	MessagePoolUser       = MaxUser / MessagePoolNum
 	MessagePoolMessageNum = MaxUser / MessagePoolNum * 4
-
-	// MessageBoxNum           = 256
-	// MessageBoxUserNum       = MaxUser / MessageBoxNum
-	// MessageBoxMessageLength = MessageBoxUserNum
-)
-
-var (
-	MyDispatcher Dispatcher
 )
 
 type Dispatcher struct {
@@ -21,8 +13,23 @@ type Dispatcher struct {
 }
 
 func init() {
-	workerPool = make(chan chan *Message, WorkPoolNum)
-	MyDispatcher = &Dispatcher{WorkerPool: workerPool}
+	InitMessagePool()
+	dispatcher := NewDispatcher()
+	dispatcher.Run()
+}
+
+func (d *Dispatcher) Run() {
+	// starting n number of workers
+	for i := 0; i < WorkNum; i++ {
+		worker := NewWorker(d.WorkerPool)
+		worker.Start()
+	}
+	go d.dispatch()
+}
+
+func NewDispatcher() *Dispatcher {
+	pool := make(chan chan *Message, WorkNum)
+	return &Dispatcher{WorkerPool: pool}
 }
 
 func (d *Dispatcher) dispatch() {
@@ -30,7 +37,7 @@ func (d *Dispatcher) dispatch() {
 		go func(idx int) {
 			for {
 				select {
-				case msg := <-MSGPool[idx].Pop():
+				case msg := <-MSGPool[idx].queue:
 					go func(msg *Message) {
 						msgChannel := <-d.WorkerPool
 						msgChannel <- msg

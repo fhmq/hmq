@@ -9,10 +9,17 @@ import (
 )
 
 type Broker struct {
+	sl     *Sublist
+	rl     *RetainList
+	queues map[string]int
 }
 
 func NewBroker() *Broker {
-	return &Broker{}
+	return &Broker{
+		sl:     NewSublist(),
+		rl:     NewRetainList(),
+		queues: make(map[string]int),
+	}
 }
 func (b *Broker) StartListening() {
 	l, e := net.Listen("tcp", "0.0.0.0:1883")
@@ -56,6 +63,16 @@ func (b *Broker) handleConnection(conn net.Conn, idx int) {
 		log.Error(err)
 		return
 	}
+
+	connack := message.NewConnackMessage()
+	connack.SetReturnCode(message.ConnectionAccepted)
+	ack, _ := EncodeMessage(connack)
+	err1 := WriteBuffer(conn, ack)
+	if err1 != nil {
+		log.Error("send connack error, ", err1)
+		return
+	}
+
 	willmsg := message.NewPublishMessage()
 	if connMsg.WillFlag() {
 		willmsg.SetQoS(connMsg.WillQos())
@@ -80,10 +97,5 @@ func (b *Broker) handleConnection(conn net.Conn, idx int) {
 		info:   info,
 	}
 	c.init()
-	c.woker = Worker{
-		WorkerPool: MyDispatcher,
-		MsgChannel: make(chan *Message),
-		quit:       make(chan bool),
-	}
 	c.readLoop(idx)
 }
