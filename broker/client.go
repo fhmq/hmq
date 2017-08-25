@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/prometheus/common/log"
+	log "github.com/cihub/seelog"
 )
 
 type client struct {
@@ -129,6 +129,15 @@ func (c *client) ProcessPublish(buf []byte) {
 		return
 	}
 	c.ProcessPublishMessage(buf, msg)
+
+	if msg.Retain() {
+		if b := c.broker; b != nil {
+			err := b.rl.Insert(msg.Topic(), buf)
+			if err != nil {
+				log.Error("Insert Retain Message error: ", err)
+			}
+		}
+	}
 
 }
 func (c *client) ProcessPublishMessage(buf []byte, msg *message.PublishMessage) {
@@ -283,18 +292,17 @@ func (c *client) ProcessSubscribe(buf []byte) {
 	// 		srv.BroadcastSubscribeMessage(buf)
 	// 	})
 	// }
+
 	//process retain message
-	// for _, t := range topics {
-	// 	srv.startGoRoutine(func() {
-	// 		bufs := srv.rl.Match(t)
-	// 		for _, buf := range bufs {
-	// 			log.Info("process retain  message: ", string(buf))
-	// 			if buf != nil && string(buf) != "" {
-	// 				c.writeBuffer(buf)
-	// 			}
-	// 		}
-	// 	})
-	// }
+	for _, t := range topics {
+		bufs := srv.rl.Match(t)
+		for _, buf := range bufs {
+			log.Info("process retain  message: ", string(buf))
+			if buf != nil && string(buf) != "" {
+				c.writeBuffer(buf)
+			}
+		}
+	}
 }
 
 func (c *client) ProcessUnSubscribe(buf []byte) {
@@ -366,16 +374,11 @@ func (c *client) Close() {
 	srv := c.broker
 	subs := c.subs
 	if srv != nil {
-		// srv.removeClient(c)
 		for _, sub := range subs {
-			// log.Info("remove Sub")
 			err := srv.sl.Remove(sub)
 			if err != nil {
 				log.Error("closed client but remove sublist error, ", err)
 			}
-			// if c.typ == CLIENT {
-			// 	srv.BroadcastUnSubscribe(sub)
-			// }
 		}
 	}
 	if c.conn != nil {

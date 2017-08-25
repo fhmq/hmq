@@ -9,24 +9,32 @@ import (
 )
 
 type Broker struct {
+	id     string
+	config *Config
+	remote map[string]*client
 	sl     *Sublist
 	rl     *RetainList
 	queues map[string]int
 }
 
-func NewBroker() *Broker {
+func NewBroker(config *Config) *Broker {
 	return &Broker{
+		config: config,
 		sl:     NewSublist(),
 		rl:     NewRetainList(),
 		queues: make(map[string]int),
+		remote: make(map[string]*client),
 	}
 }
+
 func (b *Broker) StartListening() {
-	l, e := net.Listen("tcp", "0.0.0.0:1883")
+	hp := b.config.Host + ":" + b.config.Port
+	l, e := net.Listen("tcp", hp)
 	if e != nil {
 		log.Error("Error listening on ", e)
 		return
 	}
+	log.Info("Start Listening client on ", hp)
 	tmpDelay := 10 * ACCEPT_MIN_SLEEP
 	num := 0
 	for {

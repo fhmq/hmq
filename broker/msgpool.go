@@ -2,6 +2,13 @@ package broker
 
 import "sync"
 
+const (
+	MaxUser               = 1024 * 1024
+	MessagePoolNum        = 1024
+	MessagePoolUser       = MaxUser / MessagePoolNum
+	MessagePoolMessageNum = MaxUser / MessagePoolNum * 4
+)
+
 type Message struct {
 	client *client
 	msg    []byte

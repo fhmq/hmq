@@ -1,11 +1,7 @@
 package broker
 
 const (
-	WorkNum               = 2048
-	MaxUser               = 1024 * 1024
-	MessagePoolNum        = 1024
-	MessagePoolUser       = MaxUser / MessagePoolNum
-	MessagePoolMessageNum = MaxUser / MessagePoolNum * 4
+	WorkNum = 2048
 )
 
 type Dispatcher struct {

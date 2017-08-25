@@ -9,7 +9,13 @@ import (
 )
 
 func main() {
-	broker := broker.NewBroker()
+	config, er := broker.LoadConfig()
+	if er != nil {
+		log.Error("Load Config file error: ", er)
+		return
+	}
+
+	broker := broker.NewBroker(config)
 	broker.StartListening()
 
 	s := waitForSignal()
