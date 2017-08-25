@@ -13,8 +13,15 @@ const (
 )
 
 type Config struct {
-	Host string `json:"host"`
-	Port string `json:"port"`
+	Host    string    `json:"host"`
+	Port    string    `json:"port"`
+	Cluster RouteInfo `json:"cluster"`
+}
+
+type RouteInfo struct {
+	Host   string   `json:"host"`
+	Port   string   `json:"port"`
+	Routes []string `json:"routes"`
 }
 
 func LoadConfig() (*Config, error) {
@@ -23,20 +30,26 @@ func LoadConfig() (*Config, error) {
 		log.Error("Read config file error: ", err)
 		return nil, err
 	}
-	var info Config
-	err = json.Unmarshal(content, &info)
+	var config Config
+	err = json.Unmarshal(content, &config)
 	if err != nil {
 		log.Error("Unmarshal config file error: ", err)
 		return nil, err
 	}
 
-	if info.Port != "" {
-		if info.Host == "" {
-			info.Host = "0.0.0.0"
+	if config.Port != "" {
+		if config.Host == "" {
+			config.Host = "0.0.0.0"
 		}
 	} else {
 		return nil, errors.New("Listen port nil")
 	}
 
-	return &info, nil
+	if config.Cluster.Port != "" {
+		if config.Cluster.Host == "" {
+			config.Cluster.Host = "0.0.0.0"
+		}
+	}
+
+	return &config, nil
 }

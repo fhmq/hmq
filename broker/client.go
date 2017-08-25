@@ -10,14 +10,25 @@ import (
 	log "github.com/cihub/seelog"
 )
 
+const (
+	// special pub topic for cluster info BrokerInfoTopic
+	BrokerInfoTopic = "broker001info/brokerinfo"
+	// CLIENT is an end user.
+	CLIENT = 0
+	// ROUTER is another router in the cluster.
+	ROUTER = 1
+	//REMOTE is the router connect to other cluster
+	REMOTE = 2
+)
+
 type client struct {
-	mu       sync.Mutex
-	broker   *Broker
-	conn     net.Conn
-	info     info
-	localIP  string
-	remoteIP string
-	subs     map[string]*subscription
+	typ    int
+	mu     sync.Mutex
+	broker *Broker
+	conn   net.Conn
+	info   info
+	route  *route
+	subs   map[string]*subscription
 }
 
 type subscription struct {
@@ -33,12 +44,19 @@ type info struct {
 	password  []byte
 	keepalive uint16
 	willMsg   *message.PublishMessage
+	localIP   string
+	remoteIP  string
+}
+
+type route struct {
+	remoteID  string
+	remoteUrl string
 }
 
 func (c *client) init() {
 	c.subs = make(map[string]*subscription, 10)
-	c.localIP = strings.Split(c.conn.LocalAddr().String(), ":")[0]
-	c.remoteIP = strings.Split(c.conn.RemoteAddr().String(), ":")[0]
+	c.info.localIP = strings.Split(c.conn.LocalAddr().String(), ":")[0]
+	c.info.remoteIP = strings.Split(c.conn.RemoteAddr().String(), ":")[0]
 }
 
 func (c *client) readLoop(idx int) {

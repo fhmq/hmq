@@ -16,7 +16,7 @@ func main() {
 	}
 
 	broker := broker.NewBroker(config)
-	broker.StartListening()
+	broker.Start()
 
 	s := waitForSignal()
 	log.Infof("signal got: %v ,broker closed.", s)
