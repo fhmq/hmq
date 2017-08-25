@@ -11,8 +11,9 @@ import (
 type Broker struct {
 	id      string
 	config  *Config
-	clients ClientMap
-	routes  ClientMap
+	clients cMap
+	routes  cMap
+	remotes cMap
 	sl      *Sublist
 	rl      *RetainList
 	queues  map[string]int
@@ -20,12 +21,14 @@ type Broker struct {
 
 func NewBroker(config *Config) *Broker {
 	return &Broker{
+		id:      GenUniqueId(),
 		config:  config,
 		sl:      NewSublist(),
 		rl:      NewRetainList(),
 		queues:  make(map[string]int),
 		clients: NewClientMap(),
 		routes:  NewClientMap(),
+		remotes: NewClientMap(),
 	}
 }
 
@@ -117,25 +120,29 @@ func (b *Broker) handleConnection(typ int, conn net.Conn, idx int) {
 	}
 
 	c := &client{
+		typ:    typ,
 		broker: b,
 		conn:   conn,
 		info:   info,
 	}
 	c.init()
 
+	var msgPool *MessagePool
 	var exist bool
 	var old *client
 	cid := string(c.info.clientID)
 	if typ == CLIENT {
 		old, exist = b.clients.Update(cid, c)
+		msgPool = MSGPool[idx%MessagePoolNum].GetPool()
 	} else if typ == ROUTER {
 		old, exist = b.routes.Update(cid, c)
+		msgPool = MSGPool[MessagePoolNum].GetPool()
 	}
 	if exist {
 		log.Warn("client or routers exists, close old...")
 		old.Close()
 	}
-	c.readLoop(idx)
+	c.readLoop(msgPool)
 }
 
 func (b *Broker) ConnectToRouters() {
@@ -160,7 +167,121 @@ func (b *Broker) connectRouter(url, remoteID string) {
 			remoteID:  remoteID,
 			remoteUrl: url,
 		}
+		cid := GenUniqueId()
+		info := info{
+			clientID: []byte(cid),
+		}
+		c := &client{
+			typ:   REMOTE,
+			conn:  conn,
+			route: route,
+			info:  info,
+		}
+		b.remotes.Set(cid, c)
+		c.SendConnect()
+		c.SendInfo()
 		// s.createRemote(conn, route)
+		msgPool := MSGPool[(MessagePoolNum + 1)].GetPool()
+		c.readLoop(msgPool)
+	}
+}
+
+func (b *Broker) CheckRemoteExist(remoteID, url string) bool {
+	exist := false
+	remotes := b.remotes.Items()
+	for _, v := range remotes {
+		if v.route.remoteUrl == url {
+			// if v.route.remoteID == "" || v.route.remoteID != remoteID {
+			v.route.remoteID = remoteID
+			// }
+			exist = true
+			break
+		}
+	}
+	return exist
+}
+
+func (b *Broker) SendLocalSubsToRouter(c *client) {
+	clients := b.clients.Items()
+	subMsg := message.NewSubscribeMessage()
+	for _, client := range clients {
+		subs := client.subs
+		for _, sub := range subs {
+			subMsg.AddTopic(sub.topic, sub.qos)
+		}
+	}
+	err := c.writeMessage(subMsg)
+	if err != nil {
+		log.Error("Send localsubs To Router error :", err)
+	}
+}
+
+func (b *Broker) BroadcastInfoMessage(remoteID string, msg message.Message) {
+	remotes := b.remotes.Items()
+	for _, r := range remotes {
+		if r.route.remoteID == remoteID {
+			continue
+		}
+		r.writeMessage(msg)
+	}
+	// log.Info("BroadcastInfoMessage success ")
+}
+
+func (b *Broker) BroadcastSubOrUnsubMessage(buf []byte) {
+	remotes := b.remotes.Items()
+	for _, r := range remotes {
+		r.writeBuffer(buf)
+	}
+	// log.Info("BroadcastSubscribeMessage remotes: ", s.remotes)
+}
+
+func (b *Broker) removeClient(c *client) {
+	clientId := string(c.info.clientID)
+	typ := c.typ
+	switch typ {
+	case CLIENT:
+		b.clients.Remove(clientId)
+	case ROUTER:
+		b.routes.Remove(clientId)
+	case REMOTE:
+		b.remotes.Remove(clientId)
+	}
+	// log.Info("delete client ,", clientId)
+}
+
+func (b *Broker) ProcessPublishMessage(msg *message.PublishMessage) {
+	if b == nil {
 		return
+	}
+	topic := string(msg.Topic())
+
+	r := b.sl.Match(topic)
+	// log.Info("psubs num: ", len(r.psubs))
+	if len(r.qsubs) == 0 && len(r.psubs) == 0 {
+		return
+	}
+
+	for _, sub := range r.psubs {
+		if sub != nil {
+			err := sub.client.writeMessage(msg)
+			if err != nil {
+				log.Error("process message for psub error,  ", err)
+			}
+		}
+	}
+
+	for i, sub := range r.qsubs {
+		// s.qmu.Lock()
+		if cnt, exist := b.queues[string(sub.topic)]; exist && i == cnt {
+			if sub != nil {
+				err := sub.client.writeMessage(msg)
+				if err != nil {
+					log.Error("process will message for qsub error,  ", err)
+				}
+			}
+			b.queues[topic] = (b.queues[topic] + 1) % len(r.qsubs)
+			break
+		}
+		// s.qmu.Unlock()
 	}
 }

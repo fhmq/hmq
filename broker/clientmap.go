@@ -2,7 +2,7 @@ package broker
 
 import "sync"
 
-type ClientMap interface {
+type cMap interface {
 	Set(key string, val *client)
 	Get(key string) (*client, bool)
 	Items() map[string]*client
@@ -17,7 +17,7 @@ type clientMap struct {
 	mu    sync.RWMutex
 }
 
-func NewClientMap() ClientMap {
+func NewClientMap() cMap {
 	smap := &clientMap{
 		items: make(map[string]*client),
 	}

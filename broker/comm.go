@@ -2,7 +2,12 @@ package broker
 
 import (
 	"bytes"
+	"crypto/md5"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
+	"io"
 	"reflect"
 	"strings"
 	"time"
@@ -127,4 +132,15 @@ func equal(k1, k2 interface{}) bool {
 		return k1 == k2.(uintptr)
 	}
 	return false
+}
+
+func GenUniqueId() string {
+	b := make([]byte, 48)
+	if _, err := io.ReadFull(rand.Reader, b); err != nil {
+		return ""
+	}
+	h := md5.New()
+	h.Write([]byte(base64.URLEncoding.EncodeToString(b)))
+	return hex.EncodeToString(h.Sum(nil))
+	// return GetMd5String()
 }

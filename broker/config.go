@@ -5,7 +5,7 @@ import (
 	"errors"
 	"io/ioutil"
 
-	"github.com/prometheus/common/log"
+	log "github.com/cihub/seelog"
 )
 
 const (
