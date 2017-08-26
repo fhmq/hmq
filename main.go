@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fhmq/broker"
+	"hmq/broker"
 	"os"
 	"os/signal"
 

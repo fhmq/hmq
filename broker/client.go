@@ -2,7 +2,7 @@ package broker
 
 import (
 	"errors"
-	"fhmq/lib/message"
+	"hmq/lib/message"
 	"net"
 	"strings"
 	"sync"

@@ -2,7 +2,7 @@ package broker
 
 import (
 	"crypto/tls"
-	"fhmq/lib/message"
+	"hmq/lib/message"
 	"net"
 	"net/http"
 	"sync/atomic"
@@ -15,7 +15,7 @@ import (
 
 type Broker struct {
 	id        string
-	cid       unit64
+	cid       uint64
 	config    *Config
 	tlsConfig *tls.Config
 	clients   cMap
@@ -41,7 +41,7 @@ func NewBroker(config *Config) *Broker {
 		tlsconfig, err := NewTLSConfig(b.config.TlsInfo)
 		if err != nil {
 			log.Error("new tlsConfig error: ", err)
-			return nil, err
+			return nil
 		}
 		b.tlsConfig = tlsconfig
 	}
@@ -64,7 +64,7 @@ func (b *Broker) Start() {
 }
 
 func (b *Broker) StartWebsocketListening() {
-	path := "/" + b.config.WsPath
+	path := b.config.WsPath
 	hp := ":" + b.config.WsPort
 	log.Info("Start Webscoker Listening on ", hp, path)
 	http.Handle(path, websocket.Handler(b.wsHandler))
@@ -77,7 +77,7 @@ func (b *Broker) StartWebsocketListening() {
 
 func (b *Broker) wsHandler(ws *websocket.Conn) {
 	atomic.AddUint64(&b.cid, 1)
-	go b.handleConnection(CLIENT, conn, b.cid)
+	go b.handleConnection(CLIENT, ws, b.cid)
 }
 
 func (b *Broker) StartTLSListening() {
@@ -151,7 +151,7 @@ func (b *Broker) StartListening(typ int) {
 	}
 }
 
-func (b *Broker) handleConnection(typ int, conn net.Conn, idx int) {
+func (b *Broker) handleConnection(typ int, conn net.Conn, idx uint64) {
 	//process connect packet
 	buf, err := ReadPacket(conn)
 	if err != nil {

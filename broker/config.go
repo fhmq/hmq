@@ -48,8 +48,7 @@ func LoadConfig() (*Config, error) {
 		log.Error("Read config file error: ", err)
 		return nil, err
 	}
-
-	log.Info(string(content))
+	// log.Info(string(content))
 
 	var config Config
 	err = json.Unmarshal(content, &config)

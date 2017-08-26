@@ -1,8 +1,8 @@
 package broker
 
 import (
-	"fhmq/lib/message"
 	"fmt"
+	"hmq/lib/message"
 	"time"
 
 	simplejson "github.com/bitly/go-simplejson"
