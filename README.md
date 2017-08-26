@@ -44,6 +44,8 @@ $ go run main.go
 
 * Cluster Support
 
+* Containerization
+
 * Supports retained messages
 
 * Supports will messages  

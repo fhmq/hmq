@@ -1,0 +1,11 @@
+FROM alpine
+COPY hmq /
+COPY broker.config /
+COPY tls /tls
+COPY conf /conf
+
+EXPOSE 1883
+EXPOSE 1888
+EXPOSE 1993
+
+CMD ["/hmq"]
