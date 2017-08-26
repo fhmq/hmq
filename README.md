@@ -21,7 +21,20 @@ $ go run main.go
 		"host": "0.0.0.0",
 		"port": "1993",
 		"routers": ["10.10.0.11:1993","10.10.0.12:1993"]
-	}
+	},
+	"wsPort": "1888",
+	"wsPath": "/ws",
+	"wsTLS": true,
+	"tlsPort": "8883",
+	"tlsHost": "0.0.0.0",
+	"tlsInfo": {
+		"verify": true,
+		"caFile": "tls/ca/cacert.pem",
+		"certFile": "tls/server/cert.pem",
+		"keyFile": "tls/server/key.pem"
+	},
+	"acl":true,
+	"aclConf":"conf/acl.conf"
 }
 ~~~
 
@@ -36,6 +49,10 @@ $ go run main.go
 * Supports will messages  
 
 * Queue subscribe
+
+* Websocket Support
+
+* TLS/SSL Support
 
 ### QUEUE SUBSCRIBE
 
