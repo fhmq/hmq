@@ -55,7 +55,8 @@ $ go run main.go
 * TLS/SSL Support
 
 ### QUEUE SUBSCRIBE
-
+~~~
 | Prefix        | Examples                        |
 | ------------- |---------------------------------|
 | $queue/       | mosquitto_sub -t ‘$queue/topic’ |
+~~~
