@@ -54,6 +54,7 @@ func NewBroker(config *Config) *Broker {
 			return nil
 		}
 		b.AclConfig = aclconfig
+		b.StartAclWatcher()
 	}
 	return b
 }
