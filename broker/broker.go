@@ -2,6 +2,7 @@ package broker
 
 import (
 	"crypto/tls"
+	"hmq/lib/acl"
 	"hmq/lib/message"
 	"net"
 	"net/http"
@@ -18,6 +19,7 @@ type Broker struct {
 	cid       uint64
 	config    *Config
 	tlsConfig *tls.Config
+	AclConfig *acl.ACLConfig
 	clients   cMap
 	routes    cMap
 	remotes   cMap
@@ -45,10 +47,22 @@ func NewBroker(config *Config) *Broker {
 		}
 		b.tlsConfig = tlsconfig
 	}
+	if b.config.Acl {
+		aclconfig, err := acl.AclConfigLoad(b.config.AclConf)
+		if err != nil {
+			log.Error("Load acl conf error: ", err)
+			return nil
+		}
+		b.AclConfig = aclconfig
+	}
 	return b
 }
 
 func (b *Broker) Start() {
+	if b == nil {
+		log.Error("broker is null")
+		return
+	}
 	if b.config.Port != "" {
 		go b.StartListening(CLIENT)
 	}

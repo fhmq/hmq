@@ -146,11 +146,16 @@ func (c *client) ProcessPublish(buf []byte) {
 		c.Close()
 		return
 	}
+	topic := msg.Topic()
+
+	if c.typ != CLIENT || !c.CheckTopicAuth(PUB, string(topic)) {
+		return
+	}
 	c.ProcessPublishMessage(buf, msg)
 
 	if msg.Retain() {
 		if b := c.broker; b != nil {
-			err := b.rl.Insert(msg.Topic(), buf)
+			err := b.rl.Insert(topic, buf)
 			if err != nil {
 				log.Error("Insert Retain Message error: ", err)
 			}
@@ -246,12 +251,13 @@ func (c *client) ProcessSubscribe(buf []byte) {
 	for i, t := range topics {
 		topic := string(t)
 		//check topic auth for client
-		// if !c.CheckTopicAuth(topic, SUB) {
-		// 	log.Error("CheckSubAuth failed")
-		// 	retcodes = append(retcodes, message.QosFailure)
-		// 	continue
-		// }
-
+		if c.typ == CLIENT {
+			if !c.CheckTopicAuth(SUB, topic) {
+				log.Error("CheckSubAuth failed")
+				retcodes = append(retcodes, message.QosFailure)
+				continue
+			}
+		}
 		if _, exist := c.subs[topic]; !exist {
 			queue := false
 			if strings.HasPrefix(topic, "$queue/") {

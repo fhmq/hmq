@@ -1,6 +1,8 @@
 package broker
 
-import "sync"
+import (
+	"sync"
+)
 
 type RetainList struct {
 	sync.RWMutex

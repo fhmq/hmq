@@ -54,6 +54,8 @@ $ go run main.go
 
 * TLS/SSL Support
 
+* Flexible  ACL
+
 ### QUEUE SUBSCRIBE
 ~~~
 | Prefix        | Examples                        |
