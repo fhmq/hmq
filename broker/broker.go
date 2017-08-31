@@ -28,7 +28,7 @@ type Broker struct {
 	queues    map[string]int
 }
 
-func NewBroker(config *Config) *Broker {
+func NewBroker(config *Config) (*Broker, error) {
 	b := &Broker{
 		id:      GenUniqueId(),
 		config:  config,
@@ -43,7 +43,7 @@ func NewBroker(config *Config) *Broker {
 		tlsconfig, err := NewTLSConfig(b.config.TlsInfo)
 		if err != nil {
 			log.Error("new tlsConfig error: ", err)
-			return nil
+			return nil, err
 		}
 		b.tlsConfig = tlsconfig
 	}
@@ -51,12 +51,12 @@ func NewBroker(config *Config) *Broker {
 		aclconfig, err := acl.AclConfigLoad(b.config.AclConf)
 		if err != nil {
 			log.Error("Load acl conf error: ", err)
-			return nil
+			return nil, err
 		}
 		b.AclConfig = aclconfig
 		b.StartAclWatcher()
 	}
-	return b
+	return b, nil
 }
 
 func (b *Broker) Start() {

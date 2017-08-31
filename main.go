@@ -15,7 +15,11 @@ func main() {
 		return
 	}
 
-	broker := broker.NewBroker(config)
+	broker, err := broker.NewBroker(config)
+	if err != nil {
+		log.Error("New Broker error: ", er)
+		return
+	}
 	broker.Start()
 
 	s := waitForSignal()
