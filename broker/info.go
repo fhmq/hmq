@@ -39,7 +39,7 @@ func (c *client) SendConnect() {
 
 	clientID := c.info.clientID
 	connMsg := message.NewConnectMessage()
-	connMsg.SetClientId(clientID)
+	connMsg.SetClientId([]byte(clientID))
 	connMsg.SetVersion(0x04)
 	err := c.writeMessage(connMsg)
 	if err != nil {

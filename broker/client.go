@@ -3,6 +3,7 @@ package broker
 import (
 	"errors"
 	"hmq/lib/message"
+	"hmq/packets"
 	"net"
 	"strings"
 	"sync"
@@ -39,11 +40,11 @@ type subscription struct {
 }
 
 type info struct {
-	clientID  []byte
-	username  []byte
+	clientID  string
+	username  string
 	password  []byte
 	keepalive uint16
-	willMsg   *message.PublishMessage
+	willMsg   packets.ControlPacket
 	localIP   string
 	remoteIP  string
 }
@@ -66,14 +67,15 @@ func (c *client) readLoop(msgPool *MessagePool) {
 	}
 	msg := &Message{}
 	for {
-		buf, err := ReadPacket(nc)
+		packet, err := packets.ReadPacket(conn)
+		// buf, err := ReadPacket(nc)
 		if err != nil {
 			log.Error("read packet error: ", err)
 			c.Close()
 			return
 		}
 		msg.client = c
-		msg.msg = buf
+		msg.msg = packet
 		msgPool.queue <- msg
 	}
 	msgPool.Reduce()
@@ -85,45 +87,44 @@ func ProcessMessage(msg *Message) {
 	if c == nil || buf == nil {
 		return
 	}
-	msgType := uint8(buf[0] & 0xF0 >> 4)
-	switch msgType {
-	case CONNACK:
+	switch m := msg.(type) {
+	case *packets.Connack:
 		// log.Info("Recv conack message..........")
 		c.ProcessConnAck(buf)
-	case CONNECT:
+	case *packets.Connect:
 		// log.Info("Recv connect message..........")
 		c.ProcessConnect(buf)
-	case PUBLISH:
+	case *packets.Publish:
 		// log.Info("Recv publish message..........")
 		c.ProcessPublish(buf)
-	case PUBACK:
+	case *packets.Puback:
 		//log.Info("Recv publish  ack message..........")
 		c.ProcessPubAck(buf)
-	case PUBCOMP:
-		//log.Info("Recv publish  ack message..........")
-		c.ProcessPubComp(buf)
-	case PUBREC:
+	case *packets.Pubrec::
 		//log.Info("Recv publish rec message..........")
 		c.ProcessPubREC(buf)
-	case PUBREL:
+	case *packets.Pubrel:
 		//log.Info("Recv publish rel message..........")
 		c.ProcessPubREL(buf)
-	case SUBSCRIBE:
+	case *packets.Pubcomp:
+		//log.Info("Recv publish  ack message..........")
+		c.ProcessPubComp(buf)
+	case *packets.Subscribe:
 		// log.Info("Recv subscribe message.....")
 		c.ProcessSubscribe(buf)
-	case SUBACK:
+	case *packets.Suback:
 		// log.Info("Recv suback message.....")
-	case UNSUBSCRIBE:
+	case *packets.Unsubscribe:
 		// log.Info("Recv unsubscribe message.....")
 		c.ProcessUnSubscribe(buf)
-	case UNSUBACK:
+	case *packets.Unsuback:
 		//log.Info("Recv unsuback message.....")
-	case PINGREQ:
+	case *packets.Pingreq:
 		// log.Info("Recv PINGREQ message..........")
 		c.ProcessPing(buf)
-	case PINGRESP:
+	case *packets.PingrespPacket:
 		//log.Info("Recv PINGRESP message..........")
-	case DISCONNECT:
+	case *packets.Disconnect:
 		// log.Info("Recv DISCONNECT message.......")
 		c.Close()
 	default:
@@ -406,7 +407,7 @@ func (c *client) Close() {
 			}
 		}
 		if c.info.willMsg != nil {
-			b.ProcessPublishMessage(c.info.willMsg)
+			// b.ProcessPublishMessage(c.info.willMsg)
 		}
 	}
 	if c.conn != nil {

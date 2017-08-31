@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"hmq/lib/acl"
 	"hmq/lib/message"
+	"hmq/packets"
 	"net"
 	"net/http"
 	"sync/atomic"
@@ -168,41 +169,44 @@ func (b *Broker) StartListening(typ int) {
 
 func (b *Broker) handleConnection(typ int, conn net.Conn, idx uint64) {
 	//process connect packet
-	buf, err := ReadPacket(conn)
+	packet, err := packets.ReadPacket(conn)
 	if err != nil {
 		log.Error("read connect packet error: ", err)
 		return
 	}
-	connMsg, err := DecodeConnectMessage(buf)
+	if packet == nil {
+		log.Error("received nil packet")
+		return
+	}
+	msg, ok := packet.(*packets.ConnectPacket)
+	if !ok {
+		log.Error("received msg that was not Connect")
+		return
+	}
+	connack := packets.NewControlPacket(packets.Connack).(*packets.ConnackPacket)
+	connack.ReturnCode = packets.Accepted
+	connack.SessionPresent = msg.CleanSession
+	err = connack.Write(conn)
 	if err != nil {
-		log.Error(err)
+		log.Error("send connack error, ", err)
 		return
 	}
 
-	connack := message.NewConnackMessage()
-	connack.SetReturnCode(message.ConnectionAccepted)
-	ack, _ := EncodeMessage(connack)
-	err1 := WriteBuffer(conn, ack)
-	if err1 != nil {
-		log.Error("send connack error, ", err1)
-		return
-	}
-
-	willmsg := message.NewPublishMessage()
-	if connMsg.WillFlag() {
-		willmsg.SetQoS(connMsg.WillQos())
-		willmsg.SetPayload(connMsg.WillMessage())
-		willmsg.SetRetain(connMsg.WillRetain())
-		willmsg.SetTopic(connMsg.WillTopic())
-		willmsg.SetDup(false)
+	willmsg := packets.NewControlPacket(packets.Publish).(*packets.PublishPacket)
+	if msg.WillFlag {
+		willmsg.Qos = msg.WillQos
+		willmsg.TopicName = msg.WillTopic
+		willmsg.Retain = msg.WillRetain
+		willmsg.Payload = msg.WillMessage
+		willmsg.Dup = msg.Dup
 	} else {
 		willmsg = nil
 	}
 	info := info{
-		clientID:  connMsg.ClientId(),
-		username:  connMsg.Username(),
-		password:  connMsg.Password(),
-		keepalive: connMsg.KeepAlive(),
+		clientID:  msg.ClientIdentifier,
+		username:  msg.Username,
+		password:  msg.Password,
+		keepalive: msg.Keepalive,
 		willMsg:   willmsg,
 	}
 
@@ -256,7 +260,7 @@ func (b *Broker) connectRouter(url, remoteID string) {
 		}
 		cid := GenUniqueId()
 		info := info{
-			clientID: []byte(cid),
+			clientID: cid,
 		}
 		c := &client{
 			typ:   REMOTE,

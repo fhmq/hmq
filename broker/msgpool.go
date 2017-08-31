@@ -1,6 +1,9 @@
 package broker
 
-import "sync"
+import (
+	"hmq/packets"
+	"sync"
+)
 
 const (
 	MaxUser               = 1024 * 1024
@@ -11,7 +14,7 @@ const (
 
 type Message struct {
 	client *client
-	msg    []byte
+	msg    packets.ControlPacket
 }
 
 var (
