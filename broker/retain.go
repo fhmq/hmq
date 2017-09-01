@@ -32,7 +32,7 @@ func NewRetainList() *RetainList {
 	return &RetainList{root: newRLevel()}
 }
 
-func (r *RetainList) Insert(topic []byte, buf *packets.PublishPacket) error {
+func (r *RetainList) Insert(topic string, buf *packets.PublishPacket) error {
 
 	tokens, err := PublishTopicCheckAndSpilt(topic)
 	if err != nil {
@@ -59,7 +59,7 @@ func (r *RetainList) Insert(topic []byte, buf *packets.PublishPacket) error {
 	return nil
 }
 
-func (r *RetainList) Match(topic []byte) []*packets.PublishPacket {
+func (r *RetainList) Match(topic string) []*packets.PublishPacket {
 
 	tokens, err := SubscribeTopicCheckAndSpilt(topic)
 	if err != nil {

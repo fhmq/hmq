@@ -33,7 +33,7 @@ type client struct {
 
 type subscription struct {
 	client *client
-	topic  []byte
+	topic  string
 	qos    byte
 	queue  bool
 }
@@ -158,7 +158,7 @@ func (c *client) ProcessPublish(packet *packets.PublishPacket) {
 
 	if packet.Retain {
 		if b := c.broker; b != nil {
-			err := b.rl.Insert([]byte(topic), packet)
+			err := b.rl.Insert(topic, packet)
 			if err != nil {
 				log.Error("Insert Retain Message error: ", err)
 			}
@@ -246,7 +246,7 @@ func (c *client) ProcessSubscribe(packet *packets.SubscribePacket) {
 	var retcodes []byte
 
 	for i, topic := range topics {
-		t := []byte(topic)
+		t := topic
 		//check topic auth for client
 		if c.typ == CLIENT {
 			if !c.CheckTopicAuth(SUB, topic) {
@@ -310,7 +310,7 @@ func (c *client) ProcessSubscribe(packet *packets.SubscribePacket) {
 
 	//process retain message
 	for _, t := range topics {
-		packets := b.rl.Match([]byte(t))
+		packets := b.rl.Match(t)
 		for _, packet := range packets {
 			log.Info("process retain  message: ", packet)
 			if packet != nil {

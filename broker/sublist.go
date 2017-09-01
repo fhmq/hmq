@@ -124,8 +124,8 @@ func (s *Sublist) removeFromCache(topic string, sub *subscription) {
 }
 
 func matchLiteral(literal, topic string) bool {
-	tok, _ := SubscribeTopicCheckAndSpilt([]byte(topic))
-	li, _ := PublishTopicCheckAndSpilt([]byte(literal))
+	tok, _ := SubscribeTopicCheckAndSpilt(topic)
+	li, _ := PublishTopicCheckAndSpilt(literal)
 
 	for i := 0; i < len(tok); i++ {
 		b := tok[i]
@@ -207,7 +207,7 @@ func (s *Sublist) Match(topic string) *SublistResult {
 		return rc
 	}
 
-	tokens, err := PublishTopicCheckAndSpilt([]byte(topic))
+	tokens, err := PublishTopicCheckAndSpilt(topic)
 	if err != nil {
 		log.Error("\tserver/sublist.go: ", err)
 		return nil

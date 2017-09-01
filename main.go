@@ -4,11 +4,14 @@ import (
 	"hmq/broker"
 	"os"
 	"os/signal"
+	"runtime"
 
 	log "github.com/cihub/seelog"
 )
 
 func main() {
+	runtime.GOMAXPROCS(runtime.NumCPU())
+	runtime.GC()
 	config, er := broker.LoadConfig()
 	if er != nil {
 		log.Error("Load Config file error: ", er)

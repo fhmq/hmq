@@ -1,7 +1,6 @@
 package broker
 
 import (
-	"bytes"
 	"crypto/md5"
 	"crypto/rand"
 	"encoding/base64"
@@ -47,16 +46,10 @@ const (
 	QosFailure = 0x80
 )
 
-func SubscribeTopicCheckAndSpilt(subject []byte) ([]string, error) {
-
-	topic := string(subject)
-
-	if bytes.IndexByte(subject, '#') != -1 {
-		if bytes.IndexByte(subject, '#') != len(subject)-1 {
-			return nil, errors.New("Topic format error with index of #")
-		}
+func SubscribeTopicCheckAndSpilt(topic string) ([]string, error) {
+	if strings.Index(topic, "#") != -1 && strings.Index(topic, "#") != len(topic)-1 {
+		return nil, errors.New("Topic format error with index of #")
 	}
-
 	re := strings.Split(topic, "/")
 	for i, v := range re {
 		if i != 0 && i != (len(re)-1) {
@@ -76,11 +69,10 @@ func SubscribeTopicCheckAndSpilt(subject []byte) ([]string, error) {
 
 }
 
-func PublishTopicCheckAndSpilt(subject []byte) ([]string, error) {
-	if bytes.IndexByte(subject, '#') != -1 || bytes.IndexByte(subject, '+') != -1 {
+func PublishTopicCheckAndSpilt(topic string) ([]string, error) {
+	if strings.Index(topic, "#") != -1 || strings.Index(topic, "+") != -1 {
 		return nil, errors.New("Publish Topic format error with + and #")
 	}
-	topic := string(subject)
 	re := strings.Split(topic, "/")
 	for i, v := range re {
 		if v == "" {
