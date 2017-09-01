@@ -218,28 +218,26 @@ func (b *Broker) handleConnection(typ int, conn net.Conn, idx uint64) {
 	cid := c.info.clientID
 
 	var msgPool *MessagePool
-	var loaded bool
-	var old *client
+	var exist bool
+	var old interface{}
 
 	switch typ {
 	case CLIENT:
 		msgPool = MSGPool[idx%MessagePoolNum].GetPool()
-		old, loaded = b.clients.LoadOrStore(cid)
-		if !loaded {
-			b.clients.Store(cid, c)
-			old.(*client).Close()
-		}
+		old, exist = b.clients.Load(cid)
+		b.clients.Store(cid, c)
 	case ROUTER:
 		msgPool = MSGPool[MessagePoolNum].GetPool()
-		old, loaded = b.routes.LoadOrStore(cid)
-		if !loaded {
-			b.routes.Store(cid, c)
-		}
+		old, exist = b.routes.Load(cid)
+		b.routes.Store(cid, c)
 	}
 
-	if !loaded {
-		log.Warn("client or routers exists, close old...")
-		old.(*client).Close()
+	if exist {
+		log.Warn("client or routers exist, close old...")
+		ol, ok := old.(*client)
+		if ok {
+			ol.Close()
+		}
 	}
 	c.readLoop(msgPool)
 }
@@ -287,7 +285,7 @@ func (b *Broker) connectRouter(url, remoteID string) {
 
 func (b *Broker) CheckRemoteExist(remoteID, url string) bool {
 	exist := false
-	remotes := b.remotes.Range(func(key, value interface{}) bool {
+	b.remotes.Range(func(key, value interface{}) bool {
 		v, ok := value.(*client)
 		if ok {
 			if v.route.remoteUrl == url {
@@ -306,7 +304,7 @@ func (b *Broker) CheckRemoteExist(remoteID, url string) bool {
 func (b *Broker) SendLocalSubsToRouter(c *client) {
 	subInfo := packets.NewControlPacket(packets.Subscribe).(*packets.SubscribePacket)
 	b.clients.Range(func(key, value interface{}) bool {
-		client, ok := value.(*clients)
+		client, ok := value.(*client)
 		if ok {
 			subs := client.subs
 			for _, sub := range subs {
@@ -341,7 +339,7 @@ func (b *Broker) BroadcastSubOrUnsubMessage(packet packets.ControlPacket) {
 	b.remotes.Range(func(key, value interface{}) bool {
 		r, ok := value.(*client)
 		if ok {
-			r.WriterPacket(msg)
+			r.WriterPacket(packet)
 		}
 		return true
 	})
@@ -353,11 +351,11 @@ func (b *Broker) removeClient(c *client) {
 	typ := c.typ
 	switch typ {
 	case CLIENT:
-		b.clients.Remove(clientId)
+		b.clients.Delete(clientId)
 	case ROUTER:
-		b.routes.Remove(clientId)
+		b.routes.Delete(clientId)
 	case REMOTE:
-		b.remotes.Remove(clientId)
+		b.remotes.Delete(clientId)
 	}
 	// log.Info("delete client ,", clientId)
 }
