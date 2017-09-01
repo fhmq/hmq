@@ -40,6 +40,12 @@ const (
 	PINGRESP
 	DISCONNECT
 )
+const (
+	QosAtMostOnce byte = iota
+	QosAtLeastOnce
+	QosExactlyOnce
+	QosFailure = 0x80
+)
 
 func SubscribeTopicCheckAndSpilt(subject []byte) ([]string, error) {
 

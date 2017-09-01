@@ -14,7 +14,7 @@ const (
 
 type Message struct {
 	client *client
-	msg    packets.ControlPacket
+	packet packets.ControlPacket
 }
 
 var (

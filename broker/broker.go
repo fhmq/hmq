@@ -3,7 +3,6 @@ package broker
 import (
 	"crypto/tls"
 	"hmq/lib/acl"
-	"hmq/lib/message"
 	"hmq/packets"
 	"net"
 	"net/http"
@@ -294,34 +293,35 @@ func (b *Broker) CheckRemoteExist(remoteID, url string) bool {
 
 func (b *Broker) SendLocalSubsToRouter(c *client) {
 	clients := b.clients.Items()
-	subMsg := message.NewSubscribeMessage()
+	subInfo := packets.NewControlPacket(packets.Subscribe).(*packets.SubscribePacket)
 	for _, client := range clients {
 		subs := client.subs
 		for _, sub := range subs {
-			subMsg.AddTopic(sub.topic, sub.qos)
+			subInfo.Topics = append(subInfo.Topics, string(sub.topic))
+			subInfo.Qoss = append(subInfo.Qoss, sub.qos)
 		}
 	}
-	err := c.writeMessage(subMsg)
+	err := c.WriterPacket(subInfo)
 	if err != nil {
 		log.Error("Send localsubs To Router error :", err)
 	}
 }
 
-func (b *Broker) BroadcastInfoMessage(remoteID string, msg message.Message) {
+func (b *Broker) BroadcastInfoMessage(remoteID string, msg *packets.PublishPacket) {
 	remotes := b.remotes.Items()
 	for _, r := range remotes {
 		if r.route.remoteID == remoteID {
 			continue
 		}
-		r.writeMessage(msg)
+		r.WriterPacket(msg)
 	}
 	// log.Info("BroadcastInfoMessage success ")
 }
 
-func (b *Broker) BroadcastSubOrUnsubMessage(buf []byte) {
+func (b *Broker) BroadcastSubOrUnsubMessage(packet packets.ControlPacket) {
 	remotes := b.remotes.Items()
 	for _, r := range remotes {
-		r.writeBuffer(buf)
+		r.WriterPacket(packet)
 	}
 	// log.Info("BroadcastSubscribeMessage remotes: ", s.remotes)
 }
@@ -340,12 +340,8 @@ func (b *Broker) removeClient(c *client) {
 	// log.Info("delete client ,", clientId)
 }
 
-func (b *Broker) ProcessPublishMessage(msg *message.PublishMessage) {
-	if b == nil {
-		return
-	}
-	topic := string(msg.Topic())
-
+func (b *Broker) ProcessPublishMessage(packet *packets.PublishPacket) {
+	topic := packet.TopicName
 	r := b.sl.Match(topic)
 	// log.Info("psubs num: ", len(r.psubs))
 	if len(r.qsubs) == 0 && len(r.psubs) == 0 {
@@ -354,7 +350,7 @@ func (b *Broker) ProcessPublishMessage(msg *message.PublishMessage) {
 
 	for _, sub := range r.psubs {
 		if sub != nil {
-			err := sub.client.writeMessage(msg)
+			err := sub.client.WriterPacket(packet)
 			if err != nil {
 				log.Error("process message for psub error,  ", err)
 			}
@@ -365,7 +361,7 @@ func (b *Broker) ProcessPublishMessage(msg *message.PublishMessage) {
 		// s.qmu.Lock()
 		if cnt, exist := b.queues[string(sub.topic)]; exist && i == cnt {
 			if sub != nil {
-				err := sub.client.writeMessage(msg)
+				err := sub.client.WriterPacket(packet)
 				if err != nil {
 					log.Error("process will message for qsub error,  ", err)
 				}

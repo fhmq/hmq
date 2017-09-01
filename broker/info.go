@@ -2,7 +2,7 @@ package broker
 
 import (
 	"fmt"
-	"hmq/lib/message"
+	"hmq/packets"
 	"time"
 
 	simplejson "github.com/bitly/go-simplejson"
@@ -13,7 +13,7 @@ func (c *client) SendInfo() {
 	url := c.info.localIP + ":" + c.broker.config.Cluster.Port
 
 	infoMsg := NewInfo(c.broker.id, url, false)
-	err := c.writeMessage(infoMsg)
+	err := c.WriterPacket(infoMsg)
 	if err != nil {
 		log.Error("send info message error, ", err)
 		return
@@ -23,11 +23,11 @@ func (c *client) SendInfo() {
 
 func (c *client) StartPing() {
 	timeTicker := time.NewTicker(time.Second * 30)
-	ping := message.NewPingreqMessage()
+	ping := packets.NewControlPacket(packets.Pingreq).(*packets.PingreqPacket)
 	for {
 		select {
 		case <-timeTicker.C:
-			err := c.writeMessage(ping)
+			err := c.WriterPacket(ping)
 			if err != nil {
 				log.Error("ping error: ", err)
 			}
@@ -37,11 +37,12 @@ func (c *client) StartPing() {
 
 func (c *client) SendConnect() {
 
-	clientID := c.info.clientID
-	connMsg := message.NewConnectMessage()
-	connMsg.SetClientId([]byte(clientID))
-	connMsg.SetVersion(0x04)
-	err := c.writeMessage(connMsg)
+	m := packets.NewControlPacket(packets.Connect).(*packets.ConnectPacket)
+
+	m.CleanSession = true
+	m.ClientIdentifier = c.info.clientID
+	m.Keepalive = uint16(60)
+	err := c.WriterPacket(m)
 	if err != nil {
 		log.Error("send connect message error, ", err)
 		return
@@ -49,27 +50,27 @@ func (c *client) SendConnect() {
 	// log.Info("send connet success")
 }
 
-func NewInfo(sid, url string, isforword bool) *message.PublishMessage {
-	infoMsg := message.NewPublishMessage()
-	infoMsg.SetTopic([]byte(BrokerInfoTopic))
+func NewInfo(sid, url string, isforword bool) *packets.PublishPacket {
+	pub := packets.NewControlPacket(packets.Publish).(*packets.PublishPacket)
+	pub.Qos = 0
+	pub.TopicName = BrokerInfoTopic
+	pub.Retain = false
 	info := fmt.Sprintf(`{"remoteID":"%s","url":"%s","isForward":%t}`, sid, url, isforword)
 	// log.Info("new info", string(info))
-	infoMsg.SetPayload([]byte(info))
-	infoMsg.SetQoS(0)
-	infoMsg.SetRetain(false)
-	return infoMsg
+	pub.Payload = []byte(info)
+	return pub
 }
 
-func (c *client) ProcessInfo(msg *message.PublishMessage) {
+func (c *client) ProcessInfo(packet *packets.PublishPacket) {
 	nc := c.conn
 	b := c.broker
 	if nc == nil {
 		return
 	}
 
-	log.Info("recv remoteInfo: ", string(msg.Payload()))
+	log.Info("recv remoteInfo: ", string(packet.Payload))
 
-	js, e := simplejson.NewJson(msg.Payload())
+	js, e := simplejson.NewJson(packet.Payload)
 	if e != nil {
 		log.Warn("parse info message err", e)
 		return

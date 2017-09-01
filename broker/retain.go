@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"hmq/packets"
 	"sync"
 )
 
@@ -13,14 +14,14 @@ type rlevel struct {
 }
 type rnode struct {
 	next *rlevel
-	msg  []byte
+	msg  *packets.PublishPacket
 }
 type RetainResult struct {
-	msg [][]byte
+	msg []*packets.PublishPacket
 }
 
 func newRNode() *rnode {
-	return &rnode{msg: make([]byte, 0, 4)}
+	return &rnode{}
 }
 
 func newRLevel() *rlevel {
@@ -31,7 +32,7 @@ func NewRetainList() *RetainList {
 	return &RetainList{root: newRLevel()}
 }
 
-func (r *RetainList) Insert(topic, buf []byte) error {
+func (r *RetainList) Insert(topic []byte, buf *packets.PublishPacket) error {
 
 	tokens, err := PublishTopicCheckAndSpilt(topic)
 	if err != nil {
@@ -58,7 +59,7 @@ func (r *RetainList) Insert(topic, buf []byte) error {
 	return nil
 }
 
-func (r *RetainList) Match(topic []byte) [][]byte {
+func (r *RetainList) Match(topic []byte) []*packets.PublishPacket {
 
 	tokens, err := SubscribeTopicCheckAndSpilt(topic)
 	if err != nil {
@@ -110,7 +111,7 @@ func matchRLevel(l *rlevel, toks []string, results *RetainResult) {
 
 func (r *rnode) GetAll(results *RetainResult) {
 	// log.Info("node 's message: ", string(r.msg))
-	if r.msg != nil && string(r.msg) != "" {
+	if r.msg != nil {
 		results.msg = append(results.msg, r.msg)
 	}
 	l := r.next
