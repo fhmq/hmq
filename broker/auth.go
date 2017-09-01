@@ -14,7 +14,7 @@ const (
 )
 
 func (c *client) CheckTopicAuth(typ int, topic string) bool {
-	if !c.broker.config.Acl {
+	if c.typ != CLIENT || !c.broker.config.Acl {
 		return true
 	}
 	if strings.HasPrefix(topic, "$queue/") {

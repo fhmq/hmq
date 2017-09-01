@@ -40,7 +40,7 @@ $ go run main.go
 
 ### Features and Future
 
-* Supports QOS 0
+* Supports QOS 0 and 1
 
 * Cluster Support
 
