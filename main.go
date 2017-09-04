@@ -9,6 +9,10 @@ import (
 	log "github.com/cihub/seelog"
 )
 
+func init() {
+
+}
+
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 	runtime.GC()
@@ -17,13 +21,14 @@ func main() {
 		log.Error("Load Config file error: ", er)
 		return
 	}
+	broker.StartDispatcher()
 
-	broker, err := broker.NewBroker(config)
+	b, err := broker.NewBroker(config)
 	if err != nil {
 		log.Error("New Broker error: ", er)
 		return
 	}
-	broker.Start()
+	b.Start()
 
 	s := waitForSignal()
 	log.Infof("signal got: %v ,broker closed.", s)

@@ -1,14 +1,16 @@
 package broker
 
-const (
-	WorkNum = 4096
-)
+// const (
+// 	WorkNum = 4096
+// )
+
+var WorkNum int
 
 type Dispatcher struct {
 	WorkerPool chan chan *Message
 }
 
-func init() {
+func StartDispatcher() {
 	InitMessagePool()
 	dispatcher := NewDispatcher()
 	dispatcher.Run()

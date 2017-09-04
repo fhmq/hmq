@@ -15,6 +15,7 @@ const (
 )
 
 type Config struct {
+	Worker  int       `json:"workerNum"`
 	Host    string    `json:"host"`
 	Port    string    `json:"port"`
 	Cluster RouteInfo `json:"cluster"`
@@ -56,6 +57,12 @@ func LoadConfig() (*Config, error) {
 		log.Error("Unmarshal config file error: ", err)
 		return nil, err
 	}
+
+	if config.Worker == 0 {
+		config.Worker = 1024
+	}
+
+	WorkNum = config.Worker
 
 	if config.Port != "" {
 		if config.Host == "" {
