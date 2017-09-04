@@ -364,6 +364,8 @@ func (c *client) ProcessUnSubscribe(packet *packets.UnsubscribePacket) {
 			if ok && len(c.rsubs[t]) > 0 {
 				sub = c.rsubs[t][0]
 				c.rsubs[t] = c.rsubs[t][1:]
+			} else {
+				return
 			}
 		}
 		if ok {
