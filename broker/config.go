@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	CONFIGFILE = "broker.config"
+	CONFIGFILE = "hmq.config"
 )
 
 type Config struct {

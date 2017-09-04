@@ -1,7 +1,7 @@
 package broker
 
 const (
-	WorkNum = 2048
+	WorkNum = 4096
 )
 
 type Dispatcher struct {

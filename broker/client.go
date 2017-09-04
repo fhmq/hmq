@@ -6,6 +6,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	log "github.com/cihub/seelog"
 )
@@ -70,15 +71,24 @@ func (c *client) readLoop(msgPool *MessagePool) {
 	if nc == nil || msgPool == nil {
 		return
 	}
+
 	msg := &Message{}
+	lastIn := uint16(time.Now().Unix())
+	var nowTime uint16
 	for {
+		nowTime = uint16(time.Now().Unix())
+		if 0 != c.info.keepalive && nowTime-lastIn > c.info.keepalive*3/2 {
+			log.Errorf("Client %s has exceeded timeout, disconnecting.\n", c.info.clientID)
+			c.Close()
+			return
+		}
 		packet, err := packets.ReadPacket(nc)
-		// buf, err := ReadPacket(nc)
 		if err != nil {
 			log.Error("read packet error: ", err)
 			c.Close()
 			return
 		}
+		lastIn = uint16(time.Now().Unix())
 		msg.client = c
 		msg.packet = packet
 		msgPool.queue <- msg
