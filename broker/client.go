@@ -401,7 +401,7 @@ func (c *client) ProcessUnSubscribe(packet *packets.UnsubscribePacket) {
 func (c *client) unsubscribe(sub *subscription) {
 
 	if c.typ == CLIENT {
-		delete(c.subs, string(sub.topic))
+		delete(c.subs, sub.topic)
 	}
 
 	if c.broker != nil {
