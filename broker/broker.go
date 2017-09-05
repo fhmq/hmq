@@ -392,3 +392,17 @@ func (b *Broker) ProcessPublishMessage(packet *packets.PublishPacket) {
 		// s.qmu.Unlock()
 	}
 }
+
+func (b *Broker) BroadcastUnSubscribe(subs map[string]*subscription) {
+
+	ubsub := packets.NewControlPacket(packets.Unsubscribe).(*packets.UnsubscribePacket)
+	for topic, _ := range subs {
+		// topic := sub.topic
+		// if sub.queue {
+		// 	topic = "$queue/" + sub.topic
+		// }
+		ubsub.Topics = append(ubsub.Topics, topic)
+	}
+	b.BroadcastSubOrUnsubMessage(ubsub)
+
+}

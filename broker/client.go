@@ -429,6 +429,9 @@ func (c *client) Close() {
 				log.Error("closed client but remove sublist error, ", err)
 			}
 		}
+		if c.typ == CLIENT {
+			b.BroadcastUnSubscribe(subs)
+		}
 		if c.info.willMsg != nil {
 			b.ProcessPublishMessage(c.info.willMsg)
 		}
