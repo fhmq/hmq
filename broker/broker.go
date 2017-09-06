@@ -96,19 +96,21 @@ func (b *Broker) wsHandler(ws *websocket.Conn) {
 	go b.handleConnection(CLIENT, ws, b.cid)
 }
 
-func (b *Broker) StartClientListening(tls bool) {
+func (b *Broker) StartClientListening(Tls bool) {
 	var hp string
-	if tls {
+	var err error
+	var l net.Listener
+	if Tls {
 		hp = b.config.TlsHost + ":" + b.config.TlsPort
+		l, err = tls.Listen("tcp", hp, b.tlsConfig)
 		log.Info("Start TLS Listening client on ", hp)
 	} else {
 		hp := b.config.Host + ":" + b.config.Port
+		l, err = net.Listen("tcp", hp)
 		log.Info("Start Listening client on ", hp)
 	}
-
-	l, e := net.Listen("tcp", hp)
-	if e != nil {
-		log.Error("Error listening on ", e)
+	if err != nil {
+		log.Error("Error listening on ", err)
 		return
 	}
 	tmpDelay := 10 * ACCEPT_MIN_SLEEP
@@ -129,11 +131,6 @@ func (b *Broker) StartClientListening(tls bool) {
 			continue
 		}
 		tmpDelay = ACCEPT_MIN_SLEEP
-		if tls {
-			if !b.Handshake(conn) {
-				return
-			}
-		}
 		atomic.AddUint64(&b.cid, 1)
 		go b.handleConnection(CLIENT, conn, b.cid)
 
