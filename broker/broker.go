@@ -407,7 +407,7 @@ func (b *Broker) PublishMessage(packet *packets.PublishPacket) {
 	topic := packet.TopicName
 	r := b.sl.Match(topic)
 	// log.Info("psubs num: ", len(r.psubs))
-	if len(r.qsubs) == 0 && len(r.psubs) == 0 {
+	if len(r.psubs) == 0 {
 		return
 	}
 
@@ -418,21 +418,6 @@ func (b *Broker) PublishMessage(packet *packets.PublishPacket) {
 				log.Error("process message for psub error,  ", err)
 			}
 		}
-	}
-
-	for i, sub := range r.qsubs {
-		// s.qmu.Lock()
-		if cnt, exist := b.queues[string(sub.topic)]; exist && i == cnt {
-			if sub != nil {
-				err := sub.client.WriterPacket(packet)
-				if err != nil {
-					log.Error("process will message for qsub error,  ", err)
-				}
-			}
-			b.queues[topic] = (b.queues[topic] + 1) % len(r.qsubs)
-			break
-		}
-		// s.qmu.Unlock()
 	}
 }
 
