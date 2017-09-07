@@ -221,21 +221,29 @@ func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) {
 		}
 	}
 
-	idx, exist := b.queues[topic]
+	subinfo, exist := b.queues[topic]
+	qnum := 0
+	var qsub *subscription
 	if exist {
-
-	}
-	for _, sub := range r.qsubs {
-		if sub.client.typ == ROUTER {
-			if typ == ROUTER {
-				continue
+		idx := subinfo.index
+		for _, sub := range r.qsubs {
+			if sub.client.typ == ROUTER {
+				if typ == ROUTER {
+					continue
+				}
 			}
+			if idx <= qnum {
+				qsub = sub
+				break
+			}
+			if sub.client.typ == CLIENT {
+				qnum = qnum + 1
+			} else {
+				qnum = qnum + sub.client.rsubs[topic].num
+			}
+
 		}
-		if sub.client.typ == CLIENT {
-			qnum = qnum + 1
-		} else {
-			qnum = qnum + sub.client.rsubs[topic].num
-		}
+		subinfo.index = (idx + 1) % subinfo.count
 	}
 
 	if qsub != nil {
@@ -273,7 +281,7 @@ func (c *client) ProcessSubscribe(packet *packets.SubscribePacket) {
 			if len(t) > 7 {
 				t = t[7:]
 				if _, exists := b.queues[topic]; !exists {
-					b.queues[topic] = Queue{
+					b.queues[topic] = &Queue{
 						count: 0,
 						index: 0,
 					}
