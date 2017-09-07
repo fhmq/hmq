@@ -403,7 +403,7 @@ func (b *Broker) removeClient(c *client) {
 	// log.Info("delete client ,", clientId)
 }
 
-func (b *Broker) ProcessPublishMessage(packet *packets.PublishPacket) {
+func (b *Broker) PublishMessage(packet *packets.PublishPacket) {
 	topic := packet.TopicName
 	r := b.sl.Match(topic)
 	// log.Info("psubs num: ", len(r.psubs))
