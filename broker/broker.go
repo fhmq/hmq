@@ -26,7 +26,11 @@ type Broker struct {
 	remotes   sync.Map
 	sl        *Sublist
 	rl        *RetainList
-	queues    map[string]int
+	queues    map[string]Queue
+}
+type Queue struct {
+	count int
+	index int
 }
 
 func NewBroker(config *Config) (*Broker, error) {
@@ -35,7 +39,7 @@ func NewBroker(config *Config) (*Broker, error) {
 		config: config,
 		sl:     NewSublist(),
 		rl:     NewRetainList(),
-		queues: make(map[string]int),
+		queues: make(map[string]Queue),
 	}
 	if b.config.TlsPort != "" {
 		tlsconfig, err := NewTLSConfig(b.config.TlsInfo)
