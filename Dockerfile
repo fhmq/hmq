@@ -1,7 +1,7 @@
 FROM alpine
 COPY hmq /
-COPY broker.config /
-COPY tls /tls
+COPY hmq.config /
+COPY ssl /ssl
 COPY conf /conf
 
 EXPOSE 1883
