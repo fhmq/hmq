@@ -92,8 +92,10 @@ func (b *Broker) StartWebsocketListening() {
 }
 
 func (b *Broker) wsHandler(ws *websocket.Conn) {
+	// io.Copy(ws, ws)
 	atomic.AddUint64(&b.cid, 1)
-	go b.handleConnection(CLIENT, ws, b.cid)
+	ws.PayloadType = websocket.BinaryFrame
+	b.handleConnection(CLIENT, ws, b.cid)
 }
 
 func (b *Broker) StartClientListening(Tls bool) {
