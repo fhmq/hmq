@@ -226,7 +226,7 @@ func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) {
 	t := "$queue/" + topic
 	cnt, exist := b.queues[t]
 	if exist {
-		log.Info("queue index : ", cnt)
+		// log.Info("queue index : ", cnt)
 		for _, sub := range r.qsubs {
 			if sub.client.typ == ROUTER {
 				if c.typ == ROUTER {
