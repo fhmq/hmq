@@ -9,10 +9,6 @@ import (
 	log "github.com/cihub/seelog"
 )
 
-func init() {
-
-}
-
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 	runtime.GC()
