@@ -221,7 +221,7 @@ func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) {
 		}
 	}
 
-	pre := 0
+	pre := -1
 	now := -1
 	t := "$queue/" + topic
 	cnt, exist := b.queues[t]
@@ -238,7 +238,7 @@ func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) {
 			} else {
 				now = now + sub.client.rsubs[t].num
 			}
-			if cnt >= pre && cnt <= now {
+			if cnt > pre && cnt <= now {
 				if sub != nil {
 					err := sub.client.WriterPacket(packet)
 					if err != nil {
