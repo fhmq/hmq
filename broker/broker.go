@@ -312,8 +312,10 @@ func (b *Broker) ConnectToRouters() {
 }
 
 func (b *Broker) connectRouter(url, remoteID string) {
+	var conn net.Conn
+	var err error
 	for {
-		conn, err := net.Dial("tcp", url)
+		conn, err = net.Dial("tcp", url)
 		if err != nil {
 			log.Error("Error trying to connect to route: ", err)
 			select {
@@ -322,28 +324,25 @@ func (b *Broker) connectRouter(url, remoteID string) {
 				continue
 			}
 		}
-		route := &route{
-			remoteID:  remoteID,
-			remoteUrl: url,
-		}
-		cid := GenUniqueId()
-		info := info{
-			clientID: cid,
-		}
-		c := &client{
-			typ:   REMOTE,
-			conn:  conn,
-			route: route,
-			info:  info,
-		}
-		b.remotes.Store(cid, c)
-		c.SendConnect()
-		c.SendInfo()
-		// s.createRemote(conn, route)
-		// msgPool := MSGPool[(MessagePoolNum + 1)].GetPool()
-		c.StartPing()
-		// c.readLoop(msgPool)
 	}
+	route := &route{
+		remoteID:  remoteID,
+		remoteUrl: url,
+	}
+	cid := GenUniqueId()
+	info := info{
+		clientID: cid,
+	}
+	c := &client{
+		typ:   REMOTE,
+		conn:  conn,
+		route: route,
+		info:  info,
+	}
+	b.remotes.Store(cid, c)
+	c.SendConnect()
+	c.SendInfo()
+	c.StartPing()
 }
 
 func (b *Broker) CheckRemoteExist(remoteID, url string) bool {
