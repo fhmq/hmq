@@ -3,12 +3,14 @@ package broker
 import (
 	"crypto/tls"
 	"hmq/lib/acl"
-	"hmq/packets"
 	"net"
 	"net/http"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/eclipse/paho.mqtt.golang/packets"
 
 	"golang.org/x/net/websocket"
 
@@ -77,20 +79,21 @@ func (b *Broker) Start() {
 	if len(b.config.Cluster.Routes) > 0 {
 		b.ConnectToRouters()
 	}
-	// go StateMonitor()
+	go StateMonitor()
 
 }
 
-// func StateMonitor() {
-// 	v, _ := mem.VirtualMemory()
-// 	timeSticker := time.NewTicker(time.Second * 5)
-// 	for {
-// 		select {
-// 		case <-timeSticker.C:
-// 			fmt.Printf("Total: %v, Free:%v, UsedPercent:%f%%\n", v.Total, v.Free, v.UsedPercent)
-// 		}
-// 	}
-// }
+func StateMonitor() {
+	// v, _ := mem.VirtualMemory()
+	timeSticker := time.NewTicker(time.Second * 30)
+	for {
+		select {
+		case <-timeSticker.C:
+			debug.FreeOSMemory()
+			// fmt.Printf("Total: %v, Free:%v, UsedPercent:%f%%\n", v.Total, v.Free, v.UsedPercent)
+		}
+	}
+}
 
 func (b *Broker) StartWebsocketListening() {
 	path := b.config.WsPath

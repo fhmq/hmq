@@ -1,8 +1,9 @@
 package broker
 
 import (
-	"hmq/packets"
 	"sync"
+
+	"github.com/eclipse/paho.mqtt.golang/packets"
 )
 
 type RetainList struct {

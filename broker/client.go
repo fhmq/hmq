@@ -1,11 +1,12 @@
 package broker
 
 import (
-	"hmq/packets"
 	"net"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/eclipse/paho.mqtt.golang/packets"
 
 	log "github.com/cihub/seelog"
 )
@@ -19,6 +20,10 @@ const (
 	ROUTER = 1
 	//REMOTE is the router connect to other cluster
 	REMOTE = 2
+)
+const (
+	Connected    = 1
+	Disconnected = 2
 )
 
 type client struct {

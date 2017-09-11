@@ -15,6 +15,7 @@ $ go run main.go
 ### broker.config
 ~~~
 {
+	"workerNum": 4096,
 	"port": "1883",
 	"host": "0.0.0.0",
 	"cluster": {
