@@ -2,7 +2,6 @@ package broker
 
 import (
 	"crypto/tls"
-	"fmt"
 	"hmq/lib/acl"
 	"hmq/packets"
 	"net"
@@ -14,7 +13,6 @@ import (
 	"golang.org/x/net/websocket"
 
 	log "github.com/cihub/seelog"
-	"github.com/shirou/gopsutil/mem"
 )
 
 type Broker struct {
@@ -79,18 +77,20 @@ func (b *Broker) Start() {
 	if len(b.config.Cluster.Routes) > 0 {
 		b.ConnectToRouters()
 	}
+	// go StateMonitor()
 
 }
-func StateMonitor() {
-	v, _ := mem.VirtualMemory()
-	timeSticker := time.NewTicker(time.Second * 5)
-	for {
-		select {
-		case <-timeSticker:
-			fmt.Printf("Total: %v, Free:%v, UsedPercent:%f%%\n", v.Total, v.Free, v.UsedPercent)
-		}
-	}
-}
+
+// func StateMonitor() {
+// 	v, _ := mem.VirtualMemory()
+// 	timeSticker := time.NewTicker(time.Second * 5)
+// 	for {
+// 		select {
+// 		case <-timeSticker.C:
+// 			fmt.Printf("Total: %v, Free:%v, UsedPercent:%f%%\n", v.Total, v.Free, v.UsedPercent)
+// 		}
+// 	}
+// }
 
 func (b *Broker) StartWebsocketListening() {
 	path := b.config.WsPath
