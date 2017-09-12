@@ -11,6 +11,9 @@ import (
 )
 
 func (c *client) SendInfo() {
+	if c.status == Disconnected {
+		return
+	}
 	url := c.info.localIP + ":" + c.broker.config.Cluster.Port
 
 	infoMsg := NewInfo(c.broker.id, url, false)
@@ -37,7 +40,9 @@ func (c *client) StartPing() {
 }
 
 func (c *client) SendConnect() {
-
+	if c.status == Disconnected {
+		return
+	}
 	m := packets.NewControlPacket(packets.Connect).(*packets.ConnectPacket)
 
 	m.CleanSession = true

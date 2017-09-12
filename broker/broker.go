@@ -342,6 +342,7 @@ func (b *Broker) connectRouter(url, remoteID string) {
 		route: route,
 		info:  info,
 	}
+	c.init()
 	b.remotes.Store(cid, c)
 	c.SendConnect()
 	c.SendInfo()

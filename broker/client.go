@@ -33,6 +33,8 @@ type client struct {
 	conn   net.Conn
 	info   info
 	route  *route
+	status int
+	smu    sync.RWMutex
 	subs   map[string]*subscription
 	rsubs  map[string]*subInfo
 }
@@ -69,6 +71,9 @@ var (
 )
 
 func (c *client) init() {
+	c.smu.Lock()
+	defer c.smu.Unlock()
+	c.status = Connected
 	typ := c.typ
 	if typ == ROUTER {
 		c.rsubs = make(map[string]*subInfo)
@@ -162,8 +167,11 @@ func ProcessMessage(msg *Message) {
 }
 
 func (c *client) ProcessPublish(packet *packets.PublishPacket) {
-	topic := packet.TopicName
+	if c.status == Disconnected {
+		return
+	}
 
+	topic := packet.TopicName
 	if !c.CheckTopicAuth(PUB, topic) {
 		log.Error("Pub Topics Auth failed, ", topic)
 		return
@@ -198,6 +206,9 @@ func (c *client) ProcessPublish(packet *packets.PublishPacket) {
 }
 
 func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) {
+	if c.status == Disconnected {
+		return
+	}
 
 	b := c.broker
 	if b == nil {
@@ -282,6 +293,10 @@ func getQueueSubscribeNum(qsubs []*subscription) int {
 }
 
 func (c *client) ProcessSubscribe(packet *packets.SubscribePacket) {
+	if c.status == Disconnected {
+		return
+	}
+
 	b := c.broker
 	if b == nil {
 		return
@@ -375,6 +390,9 @@ func (c *client) ProcessSubscribe(packet *packets.SubscribePacket) {
 }
 
 func (c *client) ProcessUnSubscribe(packet *packets.UnsubscribePacket) {
+	if c.status == Disconnected {
+		return
+	}
 	b := c.broker
 	if b == nil {
 		return
@@ -437,6 +455,9 @@ func (c *client) unsubscribe(sub *subscription) {
 }
 
 func (c *client) ProcessPing() {
+	if c.status == Disconnected {
+		return
+	}
 	resp := packets.NewControlPacket(packets.Pingresp).(*packets.PingrespPacket)
 	err := c.WriterPacket(resp)
 	if err != nil {
@@ -446,6 +467,13 @@ func (c *client) ProcessPing() {
 }
 
 func (c *client) Close() {
+	c.smu.Lock()
+	c.status = Disconnected
+	if c.conn != nil {
+		c.conn.Close()
+		c.conn = nil
+	}
+	c.smu.Unlock()
 	b := c.broker
 	subs := c.subs
 	if b != nil {
@@ -462,10 +490,6 @@ func (c *client) Close() {
 		if c.info.willMsg != nil {
 			b.PublishMessage(c.info.willMsg)
 		}
-	}
-	if c.conn != nil {
-		c.conn.Close()
-		c.conn = nil
 	}
 }
 
