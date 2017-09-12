@@ -9,6 +9,24 @@ import (
 	log "github.com/cihub/seelog"
 )
 
+func init() {
+	testConfig := `
+<seelog type="sync">
+	<outputs formatid="main">
+		<console/>
+	</outputs>
+	<formats>
+		<format id="main" format="Time:%Date %Time%tfile:%File%tlevel:%LEVEL%t%Msg%n"/>
+	</formats>
+</seelog>`
+
+	logger, err := log.LoggerFromConfigAsBytes([]byte(testConfig))
+	if err != nil {
+		panic(err)
+	}
+	log.ReplaceLogger(logger)
+}
+
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 	runtime.GC()
