@@ -467,13 +467,19 @@ func (c *client) ProcessPing() {
 }
 
 func (c *client) Close() {
+	if c.status == Disconnected {
+		return
+	}
+
 	c.smu.Lock()
 	c.status = Disconnected
+	c.smu.Unlock()
+
 	if c.conn != nil {
 		c.conn.Close()
 		c.conn = nil
 	}
-	c.smu.Unlock()
+
 	b := c.broker
 	subs := c.subs
 	if b != nil {

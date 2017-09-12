@@ -86,11 +86,11 @@ func (b *Broker) Start() {
 
 func StateMonitor() {
 	v, _ := mem.VirtualMemory()
-	timeSticker := time.NewTicker(time.Second * 5)
+	timeSticker := time.NewTicker(time.Second * 30)
 	for {
 		select {
 		case <-timeSticker.C:
-			if v.UsedPercent > 0.8 {
+			if v.UsedPercent > 75 {
 				debug.FreeOSMemory()
 			}
 			// fmt.Printf("Total: %v, Free:%v, UsedPercent:%f%%\n", v.Total, v.Free, v.UsedPercent)
