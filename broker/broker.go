@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/eclipse/paho.mqtt.golang/packets"
+	"github.com/shirou/gopsutil/mem"
 
 	"golang.org/x/net/websocket"
 
@@ -84,12 +85,14 @@ func (b *Broker) Start() {
 }
 
 func StateMonitor() {
-	// v, _ := mem.VirtualMemory()
-	timeSticker := time.NewTicker(time.Second * 30)
+	v, _ := mem.VirtualMemory()
+	timeSticker := time.NewTicker(time.Second * 5)
 	for {
 		select {
 		case <-timeSticker.C:
-			debug.FreeOSMemory()
+			if v.UsedPercent > 0.8 {
+				debug.FreeOSMemory()
+			}
 			// fmt.Printf("Total: %v, Free:%v, UsedPercent:%f%%\n", v.Total, v.Free, v.UsedPercent)
 		}
 	}
