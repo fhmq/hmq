@@ -96,16 +96,12 @@ func (c *client) readLoop(msgPool *MessagePool) {
 		nowTime = uint16(time.Now().Unix())
 		if 0 != c.info.keepalive && nowTime-lastIn > c.info.keepalive*3/2 {
 			log.Errorf("Client %s has exceeded timeout, disconnecting.\n", c.info.clientID)
-			msg := &Message{client: c, packet: DisconnectdPacket}
-			msgPool.queue <- msg
-			return
+			break
 		}
 		packet, err := packets.ReadPacket(nc)
 		if err != nil {
 			log.Error("read packet error: ", err)
-			msg := &Message{client: c, packet: DisconnectdPacket}
-			msgPool.queue <- msg
-			return
+			break
 		}
 		// log.Info("recv buf: ", packet)
 		lastIn = uint16(time.Now().Unix())
@@ -115,6 +111,8 @@ func (c *client) readLoop(msgPool *MessagePool) {
 		}
 		msgPool.queue <- msg
 	}
+	msg := &Message{client: c, packet: DisconnectdPacket}
+	msgPool.queue <- msg
 	msgPool.Reduce()
 }
 
