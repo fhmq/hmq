@@ -35,6 +35,7 @@ type client struct {
 	route  *route
 	status int
 	smu    sync.RWMutex
+	mp     *MessagePool
 	subs   map[string]*subscription
 	rsubs  map[string]*subInfo
 }
@@ -84,8 +85,9 @@ func (c *client) init() {
 	c.info.remoteIP = strings.Split(c.conn.RemoteAddr().String(), ":")[0]
 }
 
-func (c *client) readLoop(msgPool *MessagePool) {
+func (c *client) readLoop() {
 	nc := c.conn
+	msgPool := c.mp
 	if nc == nil || msgPool == nil {
 		return
 	}

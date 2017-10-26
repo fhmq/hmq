@@ -292,22 +292,32 @@ func (b *Broker) handleConnection(typ int, conn net.Conn, idx uint64) {
 	switch typ {
 	case CLIENT:
 		msgPool = MSGPool[idx%MessagePoolNum].GetPool()
+		c.mp = msgPool
 		old, exist = b.clients.Load(cid)
+		if exist {
+			log.Warn("client exist, close old...")
+			ol, ok := old.(*client)
+			if ok {
+				ol.Close()
+			}
+		}
 		b.clients.Store(cid, c)
 	case ROUTER:
 		msgPool = MSGPool[(MessagePoolNum + idx)].GetPool()
+		c.mp = msgPool
 		old, exist = b.routes.Load(cid)
+		if exist {
+			log.Warn("router exist, close old...")
+			ol, ok := old.(*client)
+			if ok {
+				msg := &Message{client: c, packet: DisconnectdPacket}
+				ol.mp.queue <- msg
+			}
+		}
 		b.routes.Store(cid, c)
 	}
 
-	if exist {
-		log.Warn("client or routers exist, close old...")
-		ol, ok := old.(*client)
-		if ok {
-			ol.Close()
-		}
-	}
-	c.readLoop(msgPool)
+	c.readLoop()
 }
 
 func (b *Broker) ConnectToRouters() {
