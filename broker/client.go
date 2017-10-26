@@ -470,6 +470,8 @@ func (c *client) Close() {
 	if c.status == Disconnected {
 		return
 	}
+	//wait for message complete
+	time.Sleep(time.Second)
 
 	c.smu.Lock()
 	c.status = Disconnected
