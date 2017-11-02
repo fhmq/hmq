@@ -253,7 +253,7 @@ func (b *Broker) handleConnection(typ int, conn net.Conn, idx uint64) {
 	connack.SessionPresent = msg.CleanSession
 	err = connack.Write(conn)
 	if err != nil {
-		log.Error("send connack error, ", err)
+		log.Error("send connack error, ", err, " clientID = ", msg.ClientIdentifier)
 		return
 	}
 
@@ -295,10 +295,11 @@ func (b *Broker) handleConnection(typ int, conn net.Conn, idx uint64) {
 		c.mp = msgPool
 		old, exist = b.clients.Load(cid)
 		if exist {
-			log.Warn("client exist, close old...")
+			log.Warn("client exist, close old...", " clientID = ", c.info.clientID)
 			ol, ok := old.(*client)
 			if ok {
-				ol.Close()
+				msg := &Message{client: c, packet: DisconnectdPacket}
+				ol.mp.queue <- msg
 			}
 		}
 		b.clients.Store(cid, c)
