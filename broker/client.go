@@ -486,6 +486,11 @@ func (c *client) Close() {
 		if c.info.willMsg != nil {
 			b.PublishMessage(c.info.willMsg)
 		}
+
+		//do reconnect
+		if c.typ == REMOTE {
+			b.connectRouter(c.route.remoteUrl, "")
+		}
 	}
 }
 

@@ -34,6 +34,7 @@ func (c *client) StartPing() {
 			err := c.WriterPacket(ping)
 			if err != nil {
 				log.Error("ping error: ", err)
+				c.Close()
 			}
 		}
 	}

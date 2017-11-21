@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	CONFIGFILE = "hmq.config"
+	CONFIGFILE = "conf/hmq.config"
 )
 
 type Config struct {

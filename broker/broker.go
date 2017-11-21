@@ -65,21 +65,32 @@ func (b *Broker) Start() {
 		log.Error("broker is null")
 		return
 	}
+	//listen clinet over tcp
 	if b.config.Port != "" {
 		go b.StartClientListening(false)
 	}
+
+	//listen for cluster
 	if b.config.Cluster.Port != "" {
 		go b.StartClusterListening()
 	}
+
+	//listen for websocket
 	if b.config.WsPort != "" {
 		go b.StartWebsocketListening()
 	}
+
+	//listen client over tls
 	if b.config.TlsPort != "" {
 		go b.StartClientListening(true)
 	}
+
+	//connect on other node in cluster
 	if len(b.config.Cluster.Routes) > 0 {
 		b.ConnectToRouters()
 	}
+
+	//system montior
 	go StateMonitor()
 
 }
@@ -93,7 +104,6 @@ func StateMonitor() {
 			if v.UsedPercent > 75 {
 				debug.FreeOSMemory()
 			}
-			// fmt.Printf("Total: %v, Free:%v, UsedPercent:%f%%\n", v.Total, v.Free, v.UsedPercent)
 		}
 	}
 }
