@@ -1,9 +1,5 @@
 package broker
 
-// const (
-// 	WorkNum = 4096
-// )
-
 var WorkNum int
 
 type Dispatcher struct {

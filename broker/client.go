@@ -459,7 +459,7 @@ func (c *client) Close() {
 		return
 	}
 	//wait for message complete
-	time.Sleep(time.Second)
+	time.Sleep(10 * time.Second)
 
 	c.smu.Lock()
 	c.status = Disconnected
