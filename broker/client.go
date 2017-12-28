@@ -87,19 +87,19 @@ func (c *client) init() {
 
 func (c *client) keepAlive(ch chan int) {
 	defer close(ch)
-	keepalive := time.Duration(c.info.keepalive * 3 / 2)
-	timeTicker := time.NewTimer(keepalive * time.Second)
+	keepalive := time.Duration(c.info.keepalive*3/2) * time.Second
+	timer := time.NewTimer(keepalive)
 	msgPool := c.mp
 
 	for {
 		select {
 		case <-ch:
-			timeTicker.Reset(keepalive * time.Second)
-		case <-timeTicker.C:
-			log.Errorf("Client %s has exceeded timeout, disconnecting.\n", c.info.clientID)
+			timer.Reset(keepalive)
+		case <-timer.C:
+			log.Error("Client exceeded timeout, disconnecting. clientID = ", c.info.clientID, " keepalive = ", c.info.keepalive)
 			msg := &Message{client: c, packet: DisconnectdPacket}
 			msgPool.queue <- msg
-			timeTicker.Stop()
+			timer.Stop()
 			return
 		}
 	}
@@ -122,7 +122,7 @@ func (c *client) readLoop() {
 			break
 		}
 		// log.Info("recv buf: ", packet)
-
+		ch <- 1
 		msg := &Message{
 			client: c,
 			packet: packet,
