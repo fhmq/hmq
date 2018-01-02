@@ -65,6 +65,8 @@ func (b *Broker) Start() {
 		log.Error("broker is null")
 		return
 	}
+	StartDispatcher()
+
 	//listen clinet over tcp
 	if b.config.Port != "" {
 		go b.StartClientListening(false)

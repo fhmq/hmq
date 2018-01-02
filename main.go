@@ -34,7 +34,6 @@ func main() {
 		log.Error("Load Config file error: ", er)
 		return
 	}
-	broker.StartDispatcher()
 
 	b, err := broker.NewBroker(config)
 	if err != nil {
