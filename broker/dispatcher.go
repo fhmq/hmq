@@ -27,7 +27,7 @@ func NewDispatcher() *Dispatcher {
 }
 
 func (d *Dispatcher) dispatch() {
-	for i := 0; i < MessagePoolNum; i++ {
+	for i := 0; i < (MessagePoolNum + 2); i++ {
 		go func(idx int) {
 			for {
 				select {

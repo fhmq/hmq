@@ -21,6 +21,7 @@ import (
 type Broker struct {
 	id        string
 	cid       uint64
+	mu        sync.Mutex
 	config    *Config
 	tlsConfig *tls.Config
 	AclConfig *acl.ACLConfig
@@ -235,12 +236,6 @@ func (b *Broker) StartClusterListening() {
 		tmpDelay = ACCEPT_MIN_SLEEP
 
 		go b.handleConnection(ROUTER, conn, idx)
-		if idx == 1 {
-			idx = 0
-		} else {
-			idx = idx + 1
-		}
-
 	}
 }
 
@@ -297,6 +292,13 @@ func (b *Broker) handleConnection(typ int, conn net.Conn, idx uint64) {
 
 	cid := c.info.clientID
 
+	if typ == ROUTER {
+		c.route = route{
+			remoteID:  "",
+			remoteUrl: conn.RemoteAddr().String(),
+		}
+	}
+
 	var msgPool *MessagePool
 	var exist bool
 	var old interface{}
@@ -330,13 +332,16 @@ func (b *Broker) handleConnection(typ int, conn net.Conn, idx uint64) {
 		b.routes.Store(cid, c)
 	}
 
-	c.readLoop()
+	go c.readLoop()
+	if typ == ROUTER {
+		c.SendInfo()
+		c.StartPing()
+	}
 }
 
 func (b *Broker) ConnectToRouters() {
-	for i := 0; i < len(b.config.Cluster.Routes); i++ {
-		url := b.config.Cluster.Routes[i]
-		go b.connectRouter(url, "")
+	for _, v := range b.config.Cluster.Routes {
+		go b.connectRouter(v, "")
 	}
 }
 
@@ -347,32 +352,41 @@ func (b *Broker) connectRouter(url, remoteID string) {
 		conn, err = net.Dial("tcp", url)
 		if err != nil {
 			log.Error("Error trying to connect to route: ", err)
-			select {
-			case <-time.After(DEFAULT_ROUTE_CONNECT):
-				log.Debug("Connect to route timeout ,retry...")
-				continue
-			}
+			log.Debug("Connect to route timeout ,retry...")
+			time.Sleep(5 * time.Second)
+			continue
 		}
+		break
 	}
 	route := &route{
 		remoteID:  remoteID,
-		remoteUrl: url,
+		remoteUrl: conn.RemoteAddr().String(),
 	}
 	cid := GenUniqueId()
+
 	info := info{
-		clientID: cid,
+		clientID:  cid,
+		keepalive: 60,
 	}
+
 	c := &client{
-		typ:   REMOTE,
-		conn:  conn,
-		route: route,
-		info:  info,
+		broker: b,
+		typ:    REMOTE,
+		conn:   conn,
+		route:  route,
+		info:   info,
 	}
 	c.init()
 	b.remotes.Store(cid, c)
+
+	c.mp = MSGPool[(MessagePoolNum + 1)].GetPool()
+
 	c.SendConnect()
 	c.SendInfo()
-	c.StartPing()
+
+	go c.readLoop()
+	go c.StartPing()
+
 }
 
 func (b *Broker) CheckRemoteExist(remoteID, url string) bool {
@@ -381,9 +395,7 @@ func (b *Broker) CheckRemoteExist(remoteID, url string) bool {
 		v, ok := value.(*client)
 		if ok {
 			if v.route.remoteUrl == url {
-				// if v.route.remoteID == "" || v.route.remoteID != remoteID {
 				v.route.remoteID = remoteID
-				// }
 				exist = true
 				return false
 			}
@@ -406,14 +418,16 @@ func (b *Broker) SendLocalSubsToRouter(c *client) {
 		}
 		return true
 	})
-	err := c.WriterPacket(subInfo)
-	if err != nil {
-		log.Error("Send localsubs To Router error :", err)
+	if len(subInfo.Topics) > 0 {
+		err := c.WriterPacket(subInfo)
+		if err != nil {
+			log.Error("Send localsubs To Router error :", err)
+		}
 	}
 }
 
 func (b *Broker) BroadcastInfoMessage(remoteID string, msg *packets.PublishPacket) {
-	b.remotes.Range(func(key, value interface{}) bool {
+	b.routes.Range(func(key, value interface{}) bool {
 		r, ok := value.(*client)
 		if ok {
 			if r.route.remoteID == remoteID {
@@ -428,7 +442,8 @@ func (b *Broker) BroadcastInfoMessage(remoteID string, msg *packets.PublishPacke
 }
 
 func (b *Broker) BroadcastSubOrUnsubMessage(packet packets.ControlPacket) {
-	b.remotes.Range(func(key, value interface{}) bool {
+
+	b.routes.Range(func(key, value interface{}) bool {
 		r, ok := value.(*client)
 		if ok {
 			r.WriterPacket(packet)
@@ -455,7 +470,6 @@ func (b *Broker) removeClient(c *client) {
 func (b *Broker) PublishMessage(packet *packets.PublishPacket) {
 	topic := packet.TopicName
 	r := b.sl.Match(topic)
-	// log.Info("psubs num: ", len(r.psubs))
 	if len(r.psubs) == 0 {
 		return
 	}
@@ -472,14 +486,12 @@ func (b *Broker) PublishMessage(packet *packets.PublishPacket) {
 
 func (b *Broker) BroadcastUnSubscribe(subs map[string]*subscription) {
 
-	ubsub := packets.NewControlPacket(packets.Unsubscribe).(*packets.UnsubscribePacket)
+	unsub := packets.NewControlPacket(packets.Unsubscribe).(*packets.UnsubscribePacket)
 	for topic, _ := range subs {
-		// topic := sub.topic
-		// if sub.queue {
-		// 	topic = "$queue/" + sub.topic
-		// }
-		ubsub.Topics = append(ubsub.Topics, topic)
+		unsub.Topics = append(unsub.Topics, topic)
 	}
-	b.BroadcastSubOrUnsubMessage(ubsub)
 
+	if len(unsub.Topics) > 0 {
+		b.BroadcastSubOrUnsubMessage(unsub)
+	}
 }

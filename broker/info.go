@@ -22,7 +22,6 @@ func (c *client) SendInfo() {
 		log.Error("send info message error, ", err)
 		return
 	}
-	// log.Info("send info success")
 }
 
 func (c *client) StartPing() {
@@ -36,12 +35,17 @@ func (c *client) StartPing() {
 				log.Error("ping error: ", err)
 				c.Close()
 			}
+		case _, ok := <-c.closed:
+			if !ok {
+				return
+			}
 		}
 	}
 }
 
 func (c *client) SendConnect() {
-	if c.status == Disconnected {
+
+	if c.status != Connected {
 		return
 	}
 	m := packets.NewControlPacket(packets.Connect).(*packets.ConnectPacket)
@@ -54,7 +58,7 @@ func (c *client) SendConnect() {
 		log.Error("send connect message error, ", err)
 		return
 	}
-	// log.Info("send connet success")
+	log.Info("send connect success")
 }
 
 func NewInfo(sid, url string, isforword bool) *packets.PublishPacket {
@@ -99,10 +103,13 @@ func (c *client) ProcessInfo(packet *packets.PublishPacket) {
 		return
 	}
 
+	b.mu.Lock()
 	exist := b.CheckRemoteExist(rid, rurl)
 	if !exist {
-		go b.connectRouter(rurl, rid)
+		b.connectRouter(rurl, rid)
 	}
+	b.mu.Unlock()
+
 	// log.Info("isforword: ", isForward)
 	if !isForward {
 		route := &route{
