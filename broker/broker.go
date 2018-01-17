@@ -288,16 +288,10 @@ func (b *Broker) handleConnection(typ int, conn net.Conn, idx uint64) {
 		conn:   conn,
 		info:   info,
 	}
+
 	c.init()
 
 	cid := c.info.clientID
-
-	if typ == ROUTER {
-		c.route = route{
-			remoteID:  "",
-			remoteUrl: conn.RemoteAddr().String(),
-		}
-	}
 
 	var msgPool *MessagePool
 	var exist bool
@@ -358,7 +352,7 @@ func (b *Broker) connectRouter(url, remoteID string) {
 		}
 		break
 	}
-	route := &route{
+	route := route{
 		remoteID:  remoteID,
 		remoteUrl: conn.RemoteAddr().String(),
 	}

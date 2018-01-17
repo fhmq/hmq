@@ -110,13 +110,14 @@ func (c *client) ProcessInfo(packet *packets.PublishPacket) {
 	}
 	b.mu.Unlock()
 
-	// log.Info("isforword: ", isForward)
 	if !isForward {
-		route := &route{
-			remoteUrl: rurl,
-			remoteID:  rid,
+		if c.typ == ROUTER {
+			route := route{
+				remoteUrl: rurl,
+				remoteID:  rid,
+			}
+			c.route = route
 		}
-		c.route = route
 
 		go b.SendLocalSubsToRouter(c)
 		// log.Info("BroadcastInfoMessage starting... ")

@@ -32,7 +32,7 @@ type client struct {
 	broker *Broker
 	conn   net.Conn
 	info   info
-	route  *route
+	route  route
 	status int
 	closed chan int
 	smu    sync.RWMutex
