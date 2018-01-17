@@ -1,6 +1,5 @@
 FROM alpine
 COPY hmq /
-COPY hmq.config /
 COPY ssl /ssl
 COPY conf /conf
 
