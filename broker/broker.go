@@ -342,12 +342,31 @@ func (b *Broker) ConnectToRouters() {
 func (b *Broker) connectRouter(url, remoteID string) {
 	var conn net.Conn
 	var err error
+	var timeDelay time.Duration = 0
+	retryTimes := 0
+	max := 32 * time.Second
 	for {
 		conn, err = net.Dial("tcp", url)
 		if err != nil {
 			log.Error("Error trying to connect to route: ", err)
+
+			if retryTimes > 50 {
+				return
+			}
+
 			log.Debug("Connect to route timeout ,retry...")
-			time.Sleep(5 * time.Second)
+
+			if 0 == timeDelay {
+				timeDelay = 1 * time.Second
+			} else {
+				timeDelay *= 2
+			}
+
+			if timeDelay > max {
+				timeDelay = max
+			}
+			time.Sleep(timeDelay)
+			retryTimes++
 			continue
 		}
 		break
