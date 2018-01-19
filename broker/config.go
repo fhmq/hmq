@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 
@@ -19,6 +20,7 @@ type Config struct {
 	Host    string    `json:"host"`
 	Port    string    `json:"port"`
 	Cluster RouteInfo `json:"cluster"`
+	Router  string    `json:"router"`
 	TlsHost string    `json:"tlsHost"`
 	TlsPort string    `json:"tlsPort"`
 	WsPath  string    `json:"wsPath"`
@@ -30,9 +32,8 @@ type Config struct {
 }
 
 type RouteInfo struct {
-	Host   string   `json:"host"`
-	Port   string   `json:"port"`
-	Routes []string `json:"routes"`
+	Host string `json:"host"`
+	Port string `json:"port"`
 }
 
 type TLSInfo struct {
@@ -73,6 +74,11 @@ func LoadConfig() (*Config, error) {
 	if config.Cluster.Port != "" {
 		if config.Cluster.Host == "" {
 			config.Cluster.Host = "0.0.0.0"
+		}
+	}
+	if config.Router != "" {
+		if config.Cluster.Port == "" {
+			return nil, errors.New("cluster port is null")
 		}
 	}
 

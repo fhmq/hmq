@@ -13,13 +13,14 @@ import (
 
 const (
 	// special pub topic for cluster info BrokerInfoTopic
-	BrokerInfoTopic = "broker001info/brokerinfo"
+	BrokerInfoTopic = "broker000100101info"
 	// CLIENT is an end user.
 	CLIENT = 0
 	// ROUTER is another router in the cluster.
 	ROUTER = 1
 	//REMOTE is the router connect to other cluster
-	REMOTE = 2
+	REMOTE  = 2
+	CLUSTER = 3
 )
 const (
 	Connected    = 1
@@ -95,6 +96,10 @@ func (c *client) keepAlive(ch chan int) {
 		case <-ch:
 			timer.Reset(keepalive)
 		case <-timer.C:
+			if c.typ == REMOTE || c.typ == CLUSTER {
+				timer.Reset(keepalive)
+				continue
+			}
 			log.Error("Client exceeded timeout, disconnecting. clientID = ", c.info.clientID, " keepalive = ", c.info.keepalive)
 			msg := &Message{client: c, packet: DisconnectdPacket}
 			msgPool.queue <- msg
@@ -180,7 +185,7 @@ func (c *client) ProcessPublish(packet *packets.PublishPacket) {
 	}
 
 	topic := packet.TopicName
-	if topic == BrokerInfoTopic && c.typ != CLIENT {
+	if topic == BrokerInfoTopic && c.typ == CLUSTER {
 		c.ProcessInfo(packet)
 		return
 	}
@@ -237,8 +242,8 @@ func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) {
 	}
 
 	for _, sub := range r.psubs {
-		if sub.client.typ == REMOTE {
-			if typ == REMOTE {
+		if sub.client.typ == ROUTER {
+			if typ != CLIENT {
 				continue
 			}
 		}
@@ -257,8 +262,8 @@ func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) {
 	if exist {
 		// log.Info("queue index : ", cnt)
 		for _, sub := range r.qsubs {
-			if sub.client.typ == REMOTE {
-				if c.typ == REMOTE {
+			if sub.client.typ == ROUTER {
+				if typ != CLIENT {
 					continue
 				}
 			}
@@ -359,7 +364,7 @@ func (c *client) ProcessSubscribe(packet *packets.SubscribePacket) {
 				retcodes = append(retcodes, qoss[i])
 				continue
 			}
-		case REMOTE:
+		case ROUTER:
 			if subinfo, exist := c.rsubs[topic]; !exist {
 				sinfo := &subInfo{sub: sub, num: 1}
 				c.rsubs[topic] = sinfo
@@ -421,7 +426,7 @@ func (c *client) ProcessUnSubscribe(packet *packets.UnsubscribePacket) {
 			if ok {
 				c.unsubscribe(sub)
 			}
-		case REMOTE:
+		case ROUTER:
 			subinfo, ok := c.rsubs[t]
 			if ok {
 				subinfo.num = subinfo.num - 1
@@ -511,11 +516,15 @@ func (c *client) Close() {
 			b.PublishMessage(c.info.willMsg)
 		}
 
+		if c.typ == CLUSTER {
+			b.ConnectToDiscovery()
+		}
+
 		//do reconnect
 		if c.typ == REMOTE {
 			localUrl := c.info.localIP + ":" + c.broker.config.Cluster.Port
 			if c.route.remoteUrl != localUrl {
-				b.connectRouter(c.route.remoteUrl, "")
+				go b.connectRouter(c.route.remoteID, c.route.remoteUrl)
 			}
 		}
 	}

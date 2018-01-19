@@ -30,8 +30,8 @@ type MessagePool struct {
 }
 
 func InitMessagePool() {
-	MSGPool = make([]MessagePool, (MessagePoolNum + 2))
-	for i := 0; i < (MessagePoolNum + 2); i++ {
+	MSGPool = make([]MessagePool, (MessagePoolNum + 3))
+	for i := 0; i < (MessagePoolNum + 3); i++ {
 		MSGPool[i].Init(MessagePoolUser, MessagePoolMessageNum)
 	}
 }

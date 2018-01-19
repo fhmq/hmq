@@ -25,7 +25,7 @@ func (c *client) SendInfo() {
 }
 
 func (c *client) StartPing() {
-	timeTicker := time.NewTicker(time.Second * 30)
+	timeTicker := time.NewTicker(time.Second * 50)
 	ping := packets.NewControlPacket(packets.Pingreq).(*packets.PingreqPacket)
 	for {
 		select {
@@ -66,7 +66,7 @@ func NewInfo(sid, url string, isforword bool) *packets.PublishPacket {
 	pub.Qos = 0
 	pub.TopicName = BrokerInfoTopic
 	pub.Retain = false
-	info := fmt.Sprintf(`{"remoteID":"%s","url":"%s","isForward":%t}`, sid, url, isforword)
+	info := fmt.Sprintf(`{"brokerID":"%s","brokerUrl":"%s"}`, sid, url)
 	// log.Info("new info", string(info))
 	pub.Payload = []byte(info)
 	return pub
@@ -87,43 +87,28 @@ func (c *client) ProcessInfo(packet *packets.PublishPacket) {
 		return
 	}
 
-	rid := js.Get("remoteID").MustString()
-	rurl := js.Get("url").MustString()
-	isForward := js.Get("isForward").MustBool()
-
-	if rid == "" {
-		log.Error("receive info message error with remoteID is null")
+	routes, err := js.Get("data").Map()
+	if routes == nil {
+		log.Error("receive info message error, ", err)
 		return
 	}
 
-	if rid == b.id {
-		if !isForward {
-			c.Close() //close connet self
-		}
-		return
-	}
+	b.nodes = routes
 
 	b.mu.Lock()
-	exist := b.CheckRemoteExist(rid, rurl)
-	if !exist {
-		b.connectRouter(rurl, rid)
-	}
-	b.mu.Unlock()
-
-	if !isForward {
-		if c.typ == ROUTER {
-			route := route{
-				remoteUrl: rurl,
-				remoteID:  rid,
-			}
-			c.route = route
+	for rid, rurl := range routes {
+		if rid == b.id {
+			continue
 		}
 
-		go b.SendLocalSubsToRouter(c)
-		// log.Info("BroadcastInfoMessage starting... ")
-		infoMsg := NewInfo(rid, rurl, true)
-		b.BroadcastInfoMessage(rid, infoMsg)
-	}
+		url, ok := rurl.(string)
+		if ok {
+			exist := b.CheckRemoteExist(rid, url)
+			if !exist {
+				b.connectRouter(rid, url)
+			}
+		}
 
-	return
+	}
+	b.mu.Unlock()
 }

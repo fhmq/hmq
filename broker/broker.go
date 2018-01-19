@@ -28,6 +28,7 @@ type Broker struct {
 	clients   sync.Map
 	routes    sync.Map
 	remotes   sync.Map
+	nodes     map[string]interface{}
 	sl        *Sublist
 	rl        *RetainList
 	queues    map[string]int
@@ -39,6 +40,7 @@ func NewBroker(config *Config) (*Broker, error) {
 		config: config,
 		sl:     NewSublist(),
 		rl:     NewRetainList(),
+		nodes:  make(map[string]interface{}),
 		queues: make(map[string]int),
 	}
 	if b.config.TlsPort != "" {
@@ -89,8 +91,8 @@ func (b *Broker) Start() {
 	}
 
 	//connect on other node in cluster
-	if len(b.config.Cluster.Routes) > 0 {
-		b.ConnectToRouters()
+	if b.config.Router != "" {
+		b.ConnectToDiscovery()
 	}
 
 	//system montior
@@ -327,26 +329,71 @@ func (b *Broker) handleConnection(typ int, conn net.Conn, idx uint64) {
 	}
 
 	go c.readLoop()
-	if typ == ROUTER {
-		c.SendInfo()
-		c.StartPing()
-	}
 }
 
-func (b *Broker) ConnectToRouters() {
-	for _, v := range b.config.Cluster.Routes {
-		go b.connectRouter(v, "")
+func (b *Broker) ConnectToDiscovery() {
+	var conn net.Conn
+	var err error
+	var tempDelay time.Duration = 0
+	for {
+		conn, err = net.Dial("tcp", b.config.Router)
+		if err != nil {
+			log.Error("Error trying to connect to route: ", err)
+			log.Debug("Connect to route timeout ,retry...")
+
+			if 0 == tempDelay {
+				tempDelay = 1 * time.Second
+			} else {
+				tempDelay *= 2
+			}
+
+			if max := 20 * time.Second; tempDelay > max {
+				tempDelay = max
+			}
+			time.Sleep(tempDelay)
+			continue
+		}
+		break
 	}
+
+	log.Debug("connect to router success :", b.config.Router)
+
+	cid := b.id
+	info := info{
+		clientID:  cid,
+		keepalive: 60,
+	}
+
+	c := &client{
+		typ:    CLUSTER,
+		broker: b,
+		conn:   conn,
+		info:   info,
+	}
+
+	c.init()
+
+	c.SendConnect()
+	c.SendInfo()
+
+	c.mp = &MSGPool[(MessagePoolNum + 2)]
+	go c.readLoop()
+	go c.StartPing()
 }
 
-func (b *Broker) connectRouter(url, remoteID string) {
+func (b *Broker) connectRouter(id, addr string) {
 	var conn net.Conn
 	var err error
 	var timeDelay time.Duration = 0
 	retryTimes := 0
 	max := 32 * time.Second
 	for {
-		conn, err = net.Dial("tcp", url)
+
+		if !b.checkNodeExist(id, addr) {
+			return
+		}
+
+		conn, err = net.Dial("tcp", addr)
 		if err != nil {
 			log.Error("Error trying to connect to route: ", err)
 
@@ -372,8 +419,8 @@ func (b *Broker) connectRouter(url, remoteID string) {
 		break
 	}
 	route := route{
-		remoteID:  remoteID,
-		remoteUrl: conn.RemoteAddr().String(),
+		remoteID:  id,
+		remoteUrl: addr,
 	}
 	cid := GenUniqueId()
 
@@ -395,11 +442,29 @@ func (b *Broker) connectRouter(url, remoteID string) {
 	c.mp = MSGPool[(MessagePoolNum + 1)].GetPool()
 
 	c.SendConnect()
-	c.SendInfo()
+	// c.SendInfo()
 
 	go c.readLoop()
 	go c.StartPing()
 
+}
+
+func (b *Broker) checkNodeExist(id, url string) bool {
+	for k, v := range b.nodes {
+		if k == id {
+			return true
+		}
+
+		//skip
+		l, ok := v.(string)
+		if ok {
+			if url == l {
+				return true
+			}
+		}
+
+	}
+	return false
 }
 
 func (b *Broker) CheckRemoteExist(remoteID, url string) bool {
