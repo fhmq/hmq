@@ -14,7 +14,7 @@ $ cd hmq
 $ go run main.go
 ```
 
-### broker.config
+### hmq.config
 ~~~
 {
 	"workerNum": 4096,
@@ -22,9 +22,9 @@ $ go run main.go
 	"host": "0.0.0.0",
 	"cluster": {
 		"host": "0.0.0.0",
-		"port": "1993",
-		"routers": ["10.10.0.11:1993","10.10.0.12:1993"]
+		"port": "1993"
 	},
+	"router": "127.0.0.1:9888",
 	"wsPort": "1888",
 	"wsPath": "/ws",
 	"wsTLS": true,
@@ -60,6 +60,13 @@ $ go run main.go
 * TLS/SSL Support
 
 * Flexible  ACL
+
+### Cluster
+```bash
+ 1, start router for hmq  (https://github.com/fhmq/router.git)
+ 2, config router in hmq.config  ("router": "127.0.0.1:9888")
+ 
+```
 
 ### QUEUE SUBSCRIBE
 ~~~
