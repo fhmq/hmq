@@ -450,6 +450,10 @@ func (b *Broker) connectRouter(id, addr string) {
 }
 
 func (b *Broker) checkNodeExist(id, url string) bool {
+	if id == b.id {
+		return false
+	}
+
 	for k, v := range b.nodes {
 		if k == id {
 			return true

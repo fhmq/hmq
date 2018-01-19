@@ -522,10 +522,7 @@ func (c *client) Close() {
 
 		//do reconnect
 		if c.typ == REMOTE {
-			localUrl := c.info.localIP + ":" + c.broker.config.Cluster.Port
-			if c.route.remoteUrl != localUrl {
-				go b.connectRouter(c.route.remoteID, c.route.remoteUrl)
-			}
+			go b.connectRouter(c.route.remoteID, c.route.remoteUrl)
 		}
 	}
 }
