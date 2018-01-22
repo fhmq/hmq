@@ -328,7 +328,7 @@ func (b *Broker) handleConnection(typ int, conn net.Conn, idx uint64) {
 		b.routes.Store(cid, c)
 	}
 
-	go c.readLoop()
+	c.readLoop()
 }
 
 func (b *Broker) ConnectToDiscovery() {
