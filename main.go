@@ -1,10 +1,11 @@
 package main
 
 import (
-	"hmq/broker"
 	"os"
 	"os/signal"
 	"runtime"
+
+	"github.com/fhmq/hmq/broker"
 
 	log "github.com/cihub/seelog"
 )
