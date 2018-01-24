@@ -1,8 +1,9 @@
 package broker
 
 import (
-	"hmq/lib/acl"
 	"strings"
+
+	"github.com/fhmq/hmq/lib/acl"
 
 	log "github.com/cihub/seelog"
 	"github.com/fsnotify/fsnotify"
