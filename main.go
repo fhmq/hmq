@@ -30,9 +30,9 @@ func init() {
 
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
-	config, er := broker.LoadConfig()
+	config, er := broker.ConfigureConfig()
 	if er != nil {
-		log.Error("Load Config file error: ", er)
+		log.Error("configure broker config error: ", er)
 		return
 	}
 

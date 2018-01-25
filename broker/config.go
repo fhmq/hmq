@@ -5,14 +5,11 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io/ioutil"
 
 	log "github.com/cihub/seelog"
-)
-
-const (
-	CONFIGFILE = "conf/hmq.config"
 )
 
 type Config struct {
@@ -43,9 +40,58 @@ type TLSInfo struct {
 	KeyFile  string `json:"keyFile"`
 }
 
-func LoadConfig() (*Config, error) {
+var DefaultConfig *Config = &Config{
+	Worker: 4096,
+	Host:   "0.0.0.0",
+	Port:   "1883",
+	Acl:    false,
+}
 
-	content, err := ioutil.ReadFile(CONFIGFILE)
+func ConfigureConfig() (*Config, error) {
+	config := &Config{}
+	var (
+		configFile string
+	)
+	flag.IntVar(&config.Worker, "w", 1024, "worker num to process message, perfer (client num)/10.")
+	flag.IntVar(&config.Worker, "worker", 1024, "worker num to process message, perfer (client num)/10.")
+	flag.StringVar(&config.Port, "port", "1883", "Port to listen on.")
+	flag.StringVar(&config.Port, "p", "1883", "Port to listen on.")
+	flag.StringVar(&config.Host, "host", "0.0.0.0", "Network host to listen on.")
+	flag.StringVar(&config.Host, "h", "0.0.0.0", "Network host to listen on.")
+	flag.StringVar(&config.Cluster.Host, "cluster", "", "Cluster ip from which members can connect.")
+	flag.StringVar(&config.Cluster.Host, "cluster_listen", "", "Cluster ip from which members can connect.")
+	flag.StringVar(&config.Cluster.Port, "cp", "", "Cluster port from which members can connect.")
+	flag.StringVar(&config.Cluster.Port, "cluster_port", "", "Cluster port from which members can connect.")
+	flag.StringVar(&config.Router, "r", "", "Router who maintenance cluster info")
+	flag.StringVar(&config.Router, "router", "", "Router who maintenance cluster info")
+	flag.StringVar(&config.WsPort, "wsport", "", "port for ws to listen on")
+	flag.StringVar(&config.WsPort, "ws_port", "", "port for ws to listen on")
+	flag.StringVar(&config.WsPath, "wspath", "", "path for ws to listen on")
+	flag.StringVar(&config.WsPath, "ws_path", "", "path for ws to listen on")
+	flag.StringVar(&configFile, "config", "", "config file for hmq")
+	flag.StringVar(&configFile, "c", "", "config file for hmq")
+	flag.Parse()
+
+	if configFile != "" {
+		tmpConfig, e := LoadConfig(configFile)
+		if e != nil {
+			return nil, e
+		} else {
+			config = tmpConfig
+		}
+	}
+
+	if err := config.check(); err != nil {
+		return nil, err
+	}
+
+	return config, nil
+
+}
+
+func LoadConfig(filename string) (*Config, error) {
+
+	content, err := ioutil.ReadFile(filename)
 	if err != nil {
 		log.Error("Read config file error: ", err)
 		return nil, err
@@ -58,6 +104,11 @@ func LoadConfig() (*Config, error) {
 		log.Error("Unmarshal config file error: ", err)
 		return nil, err
 	}
+
+	return &config, nil
+}
+
+func (config *Config) check() error {
 
 	if config.Worker == 0 {
 		config.Worker = 1024
@@ -78,21 +129,20 @@ func LoadConfig() (*Config, error) {
 	}
 	if config.Router != "" {
 		if config.Cluster.Port == "" {
-			return nil, errors.New("cluster port is null")
+			return errors.New("cluster port is null")
 		}
 	}
 
 	if config.TlsPort != "" {
 		if config.TlsInfo.CertFile == "" || config.TlsInfo.KeyFile == "" {
 			log.Error("tls config error, no cert or key file.")
-			return nil, err
+			return errors.New("tls config error, no cert or key file.")
 		}
 		if config.TlsHost == "" {
 			config.TlsHost = "0.0.0.0"
 		}
 	}
-
-	return &config, nil
+	return nil
 }
 
 func NewTLSConfig(tlsInfo TLSInfo) (*tls.Config, error) {
