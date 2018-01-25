@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/eclipse/paho.mqtt.golang/packets"
+	"go.uber.org/zap"
 
 	simplejson "github.com/bitly/go-simplejson"
-	log "github.com/cihub/seelog"
 )
 
 func (c *client) SendInfo() {
@@ -21,7 +21,7 @@ func (c *client) SendInfo() {
 	infoMsg := NewInfo(c.broker.id, url, false)
 	err := c.WriterPacket(infoMsg)
 	if err != nil {
-		log.Error("send info message error, ", err)
+		log.Error("send info message error, ", zap.Error(err))
 		return
 	}
 }
@@ -34,7 +34,7 @@ func (c *client) StartPing() {
 		case <-timeTicker.C:
 			err := c.WriterPacket(ping)
 			if err != nil {
-				log.Error("ping error: ", err)
+				log.Error("ping error: ", zap.Error(err))
 				c.Close()
 			}
 		case _, ok := <-c.closed:
@@ -57,7 +57,7 @@ func (c *client) SendConnect() {
 	m.Keepalive = uint16(60)
 	err := c.WriterPacket(m)
 	if err != nil {
-		log.Error("send connect message error, ", err)
+		log.Error("send connect message error, ", zap.Error(err))
 		return
 	}
 	log.Info("send connect success")
@@ -81,17 +81,17 @@ func (c *client) ProcessInfo(packet *packets.PublishPacket) {
 		return
 	}
 
-	log.Info("recv remoteInfo: ", string(packet.Payload))
+	log.Info("recv remoteInfo: ", zap.String("payload", string(packet.Payload)))
 
-	js, e := simplejson.NewJson(packet.Payload)
-	if e != nil {
-		log.Warn("parse info message err", e)
+	js, err := simplejson.NewJson(packet.Payload)
+	if err != nil {
+		log.Warn("parse info message err", zap.Error(err))
 		return
 	}
 
 	routes, err := js.Get("data").Map()
 	if routes == nil {
-		log.Error("receive info message error, ", err)
+		log.Error("receive info message error, ", zap.Error(err))
 		return
 	}
 

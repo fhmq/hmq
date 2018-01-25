@@ -6,7 +6,7 @@ import (
 	"errors"
 	"sync"
 
-	log "github.com/cihub/seelog"
+	"go.uber.org/zap"
 )
 
 // A result structure better optimized for queue subs.
@@ -211,7 +211,7 @@ func (s *Sublist) Match(topic string) *SublistResult {
 
 	tokens, err := PublishTopicCheckAndSpilt(topic)
 	if err != nil {
-		log.Error("\tserver/sublist.go: ", err)
+		log.Error("\tserver/sublist.go: ", zap.Error(err))
 		return nil
 	}
 

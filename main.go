@@ -12,45 +12,31 @@ import (
 	"runtime"
 
 	"github.com/fhmq/hmq/broker"
-
-	log "github.com/cihub/seelog"
+	"github.com/fhmq/hmq/logger"
+	"go.uber.org/zap"
 )
 
-func init() {
-	testConfig := `
-<seelog type="sync">
-	<outputs formatid="main">
-		<console/>
-	</outputs>
-	<formats>
-		<format id="main" format="Time:%Date %Time%tfile:%File%tlevel:%LEVEL%t%Msg%n"/>
-	</formats>
-</seelog>`
-
-	logger, err := log.LoggerFromConfigAsBytes([]byte(testConfig))
-	if err != nil {
-		panic(err)
-	}
-	log.ReplaceLogger(logger)
-}
+var (
+	log = logger.Get().Named("Main")
+)
 
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
-	config, er := broker.ConfigureConfig()
-	if er != nil {
-		log.Error("configure broker config error: ", er)
+	config, err := broker.ConfigureConfig()
+	if err != nil {
+		log.Error("configure broker config error: ", zap.Error(err))
 		return
 	}
 
 	b, err := broker.NewBroker(config)
 	if err != nil {
-		log.Error("New Broker error: ", er)
+		log.Error("New Broker error: ", zap.Error(err))
 		return
 	}
 	b.Start()
 
 	s := waitForSignal()
-	log.Infof("signal got: %v ,broker closed.", s)
+	log.Info("signal received, broker closed.", zap.Any("signal", s))
 }
 
 func waitForSignal() os.Signal {

@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"io/ioutil"
 
-	log "github.com/cihub/seelog"
+	"go.uber.org/zap"
 )
 
 type Config struct {
@@ -95,7 +95,7 @@ func LoadConfig(filename string) (*Config, error) {
 
 	content, err := ioutil.ReadFile(filename)
 	if err != nil {
-		log.Error("Read config file error: ", err)
+		log.Error("Read config file error: ", zap.Error(err))
 		return nil, err
 	}
 	// log.Info(string(content))
@@ -103,7 +103,7 @@ func LoadConfig(filename string) (*Config, error) {
 	var config Config
 	err = json.Unmarshal(content, &config)
 	if err != nil {
-		log.Error("Unmarshal config file error: ", err)
+		log.Error("Unmarshal config file error: ", zap.Error(err))
 		return nil, err
 	}
 
@@ -151,11 +151,11 @@ func NewTLSConfig(tlsInfo TLSInfo) (*tls.Config, error) {
 
 	cert, err := tls.LoadX509KeyPair(tlsInfo.CertFile, tlsInfo.KeyFile)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing X509 certificate/key pair: %v", err)
+		return nil, fmt.Errorf("error parsing X509 certificate/key pair: %v", zap.Error(err))
 	}
 	cert.Leaf, err = x509.ParseCertificate(cert.Certificate[0])
 	if err != nil {
-		return nil, fmt.Errorf("error parsing certificate: %v", err)
+		return nil, fmt.Errorf("error parsing certificate: %v", zap.Error(err))
 	}
 
 	// Create TLSConfig
