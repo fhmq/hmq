@@ -151,7 +151,7 @@ func ProcessMessage(msg *Message) {
 	if ca == nil {
 		return
 	}
-	log.Debug("Recv message: ", ca.String(), " clientID = ", c.info.clientID)
+	log.Debug("Recv message from client,  ID = ", c.info.clientID)
 	switch ca.(type) {
 	case *packets.ConnackPacket:
 
