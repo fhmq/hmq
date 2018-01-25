@@ -9,7 +9,7 @@ Download: [click here](https://github.com/fhmq/hmq/releases)
 
 ## RUNNING
 ```bash
-$ go get https://github.com/fhmq/hmq.git
+$ go get github.com/fhmq/hmq
 $ cd $GOPATH/github.com/fhmq/hmq
 $ go run main.go
 ```
