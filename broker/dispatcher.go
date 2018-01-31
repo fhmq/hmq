@@ -34,10 +34,8 @@ func (d *Dispatcher) dispatch() {
 			for {
 				select {
 				case msg := <-MSGPool[idx].queue:
-					go func(msg *Message) {
-						msgChannel := <-d.WorkerPool
-						msgChannel <- msg
-					}(msg)
+					msgChannel := <-d.WorkerPool
+					msgChannel <- msg
 				}
 			}
 		}(i)
