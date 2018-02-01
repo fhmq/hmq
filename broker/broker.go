@@ -33,35 +33,35 @@ type Message struct {
 }
 
 type Broker struct {
-	id             string
-	cid            uint64
-	mu             sync.Mutex
-	config         *Config
-	tlsConfig      *tls.Config
-	AclConfig      *acl.ACLConfig
-	wpool          *pool.WorkerPool
-	clients        sync.Map
-	routes         sync.Map
-	remotes        sync.Map
-	nodes          map[string]interface{}
-	clusterChannel chan *Message
-	clientChannel  chan *Message
-	sl             *Sublist
-	rl             *RetainList
-	queues         map[string]int
+	id          string
+	cid         uint64
+	mu          sync.Mutex
+	config      *Config
+	tlsConfig   *tls.Config
+	AclConfig   *acl.ACLConfig
+	wpool       *pool.WorkerPool
+	clients     sync.Map
+	routes      sync.Map
+	remotes     sync.Map
+	nodes       map[string]interface{}
+	clusterPool chan *Message
+	messagePool chan *Message
+	sl          *Sublist
+	rl          *RetainList
+	queues      map[string]int
 }
 
 func NewBroker(config *Config) (*Broker, error) {
 	b := &Broker{
-		id:             GenUniqueId(),
-		config:         config,
-		wpool:          pool.New(config.Worker),
-		sl:             NewSublist(),
-		rl:             NewRetainList(),
-		nodes:          make(map[string]interface{}),
-		queues:         make(map[string]int),
-		clusterChannel: make(chan *Message),
-		clientChannel:  make(chan *Message),
+		id:          GenUniqueId(),
+		config:      config,
+		wpool:       pool.New(config.Worker),
+		sl:          NewSublist(),
+		rl:          NewRetainList(),
+		nodes:       make(map[string]interface{}),
+		queues:      make(map[string]int),
+		clusterPool: make(chan *Message),
+		messagePool: make(chan *Message),
 	}
 	if b.config.TlsPort != "" {
 		tlsconfig, err := NewTLSConfig(b.config.TlsInfo)
@@ -85,7 +85,7 @@ func NewBroker(config *Config) (*Broker, error) {
 
 func (b *Broker) StartDispatcher() {
 	for {
-		msg, ok := <-b.clientChannel
+		msg, ok := <-b.messagePool
 		if !ok {
 			brokerLog.Error("read message from client channel error")
 			return
@@ -356,7 +356,7 @@ func (b *Broker) handleConnection(typ int, conn net.Conn, idx uint64) {
 		b.routes.Store(cid, c)
 	}
 
-	c.readLoop(b.clientChannel)
+	c.readLoop(b.messagePool)
 }
 
 func (b *Broker) ConnectToDiscovery() {
@@ -403,13 +403,13 @@ func (b *Broker) ConnectToDiscovery() {
 	c.SendConnect()
 	c.SendInfo()
 
-	go c.readLoop(b.clusterChannel)
+	go c.readLoop(b.clusterPool)
 	go c.StartPing()
 }
 
 func (b *Broker) processClusterInfo() {
 	for {
-		msg, ok := <-b.clusterChannel
+		msg, ok := <-b.clusterPool
 		if !ok {
 			brokerLog.Error("read message from cluster channel error")
 			return
@@ -479,7 +479,7 @@ func (b *Broker) connectRouter(id, addr string) {
 
 	c.SendConnect()
 
-	go c.readLoop(b.clientChannel)
+	go c.readLoop(b.messagePool)
 	go c.StartPing()
 
 }
