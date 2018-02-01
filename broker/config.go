@@ -95,15 +95,15 @@ func LoadConfig(filename string) (*Config, error) {
 
 	content, err := ioutil.ReadFile(filename)
 	if err != nil {
-		log.Error("Read config file error: ", zap.Error(err))
+		brokerLog.Error("Read config file error: ", zap.Error(err))
 		return nil, err
 	}
-	// log.Info(string(content))
+	// brokerLog.Info(string(content))
 
 	var config Config
 	err = json.Unmarshal(content, &config)
 	if err != nil {
-		log.Error("Unmarshal config file error: ", zap.Error(err))
+		brokerLog.Error("Unmarshal config file error: ", zap.Error(err))
 		return nil, err
 	}
 
@@ -115,8 +115,6 @@ func (config *Config) check() error {
 	if config.Worker == 0 {
 		config.Worker = 1024
 	}
-
-	WorkNum = config.Worker
 
 	if config.Port != "" {
 		if config.Host == "" {
@@ -137,7 +135,7 @@ func (config *Config) check() error {
 
 	if config.TlsPort != "" {
 		if config.TlsInfo.CertFile == "" || config.TlsInfo.KeyFile == "" {
-			log.Error("tls config error, no cert or key file.")
+			brokerLog.Error("tls config error, no cert or key file.")
 			return errors.New("tls config error, no cert or key file.")
 		}
 		if config.TlsHost == "" {

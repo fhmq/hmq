@@ -21,7 +21,7 @@ func (c *client) SendInfo() {
 	infoMsg := NewInfo(c.broker.id, url, false)
 	err := c.WriterPacket(infoMsg)
 	if err != nil {
-		log.Error("send info message error, ", zap.Error(err))
+		brokerLog.Error("send info message error, ", zap.Error(err))
 		return
 	}
 }
@@ -34,7 +34,7 @@ func (c *client) StartPing() {
 		case <-timeTicker.C:
 			err := c.WriterPacket(ping)
 			if err != nil {
-				log.Error("ping error: ", zap.Error(err))
+				brokerLog.Error("ping error: ", zap.Error(err))
 				c.Close()
 			}
 		case _, ok := <-c.closed:
@@ -57,10 +57,10 @@ func (c *client) SendConnect() {
 	m.Keepalive = uint16(60)
 	err := c.WriterPacket(m)
 	if err != nil {
-		log.Error("send connect message error, ", zap.Error(err))
+		brokerLog.Error("send connect message error, ", zap.Error(err))
 		return
 	}
-	log.Info("send connect success")
+	brokerLog.Info("send connect success")
 }
 
 func NewInfo(sid, url string, isforword bool) *packets.PublishPacket {
@@ -69,7 +69,7 @@ func NewInfo(sid, url string, isforword bool) *packets.PublishPacket {
 	pub.TopicName = BrokerInfoTopic
 	pub.Retain = false
 	info := fmt.Sprintf(`{"brokerID":"%s","brokerUrl":"%s"}`, sid, url)
-	// log.Info("new info", string(info))
+	// brokerLog.Info("new info", string(info))
 	pub.Payload = []byte(info)
 	return pub
 }
@@ -81,17 +81,17 @@ func (c *client) ProcessInfo(packet *packets.PublishPacket) {
 		return
 	}
 
-	log.Info("recv remoteInfo: ", zap.String("payload", string(packet.Payload)))
+	brokerLog.Info("recv remoteInfo: ", zap.String("payload", string(packet.Payload)))
 
 	js, err := simplejson.NewJson(packet.Payload)
 	if err != nil {
-		log.Warn("parse info message err", zap.Error(err))
+		brokerLog.Warn("parse info message err", zap.Error(err))
 		return
 	}
 
 	routes, err := js.Get("data").Map()
 	if routes == nil {
-		log.Error("receive info message error, ", zap.Error(err))
+		brokerLog.Error("receive info message error, ", zap.Error(err))
 		return
 	}
 
