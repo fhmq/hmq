@@ -100,7 +100,6 @@ func ConfigureConfig(args []string) (*Config, error) {
 	fs.Visit(func(f *flag.Flag) {
 		switch f.Name {
 		case "D":
-			// Check value to support -DV=false
 			config.Debug = true
 		}
 	})

@@ -88,6 +88,9 @@ Common Options:
 ### Cluster
 ```bash
  1, start router for hmq  (https://github.com/fhmq/router.git)
+ 	$ go get github.com/fhmq/router
+ 	$ cd $GOPATH/github.com/fhmq/router
+ 	$ go run main.go
  2, config router in hmq.config  ("router": "127.0.0.1:9888")
  
 ```
