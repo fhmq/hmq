@@ -19,12 +19,10 @@ import (
 	"go.uber.org/zap"
 
 	"golang.org/x/net/websocket"
-
-	"github.com/fhmq/hmq/logger"
 )
 
 var (
-	brokerLog = logger.Get().Named("Broker")
+	brokerLog *zap.Logger
 )
 
 type Message struct {

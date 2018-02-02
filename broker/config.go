@@ -10,7 +10,9 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"os"
 
+	"github.com/fhmq/hmq/logger"
 	"go.uber.org/zap"
 )
 
@@ -28,6 +30,7 @@ type Config struct {
 	TlsInfo TLSInfo   `json:"tlsInfo"`
 	Acl     bool      `json:"acl"`
 	AclConf string    `json:"aclConf"`
+	Debug   bool      `json:"-"`
 }
 
 type RouteInfo struct {
@@ -49,30 +52,61 @@ var DefaultConfig *Config = &Config{
 	Acl:    false,
 }
 
-func ConfigureConfig() (*Config, error) {
+func showHelp() {
+	fmt.Printf("%s\n", usageStr)
+	os.Exit(0)
+}
+
+func ConfigureConfig(args []string) (*Config, error) {
 	config := &Config{}
 	var (
+		help       bool
 		configFile string
 	)
-	flag.IntVar(&config.Worker, "w", 1024, "worker num to process message, perfer (client num)/10.")
-	flag.IntVar(&config.Worker, "worker", 1024, "worker num to process message, perfer (client num)/10.")
-	flag.StringVar(&config.Port, "port", "1883", "Port to listen on.")
-	flag.StringVar(&config.Port, "p", "1883", "Port to listen on.")
-	flag.StringVar(&config.Host, "host", "0.0.0.0", "Network host to listen on.")
-	flag.StringVar(&config.Host, "h", "0.0.0.0", "Network host to listen on.")
-	flag.StringVar(&config.Cluster.Host, "cluster", "", "Cluster ip from which members can connect.")
-	flag.StringVar(&config.Cluster.Host, "cluster_listen", "", "Cluster ip from which members can connect.")
-	flag.StringVar(&config.Cluster.Port, "cp", "", "Cluster port from which members can connect.")
-	flag.StringVar(&config.Cluster.Port, "cluster_port", "", "Cluster port from which members can connect.")
-	flag.StringVar(&config.Router, "r", "", "Router who maintenance cluster info")
-	flag.StringVar(&config.Router, "router", "", "Router who maintenance cluster info")
-	flag.StringVar(&config.WsPort, "wsport", "", "port for ws to listen on")
-	flag.StringVar(&config.WsPort, "ws_port", "", "port for ws to listen on")
-	flag.StringVar(&config.WsPath, "wspath", "", "path for ws to listen on")
-	flag.StringVar(&config.WsPath, "ws_path", "", "path for ws to listen on")
-	flag.StringVar(&configFile, "config", "", "config file for hmq")
-	flag.StringVar(&configFile, "c", "", "config file for hmq")
-	flag.Parse()
+	fs := flag.NewFlagSet("hmq-broker", flag.ExitOnError)
+	fs.Usage = showHelp
+
+	fs.BoolVar(&help, "h", false, "Show this message.")
+	fs.BoolVar(&help, "help", false, "Show this message.")
+	fs.IntVar(&config.Worker, "w", 1024, "worker num to process message, perfer (client num)/10.")
+	fs.IntVar(&config.Worker, "worker", 1024, "worker num to process message, perfer (client num)/10.")
+	fs.StringVar(&config.Port, "port", "1883", "Port to listen on.")
+	fs.StringVar(&config.Port, "p", "1883", "Port to listen on.")
+	fs.StringVar(&config.Host, "host", "0.0.0.0", "Network host to listen on")
+	fs.StringVar(&config.Cluster.Port, "cp", "", "Cluster port from which members can connect.")
+	fs.StringVar(&config.Cluster.Port, "clusterport", "", "Cluster port from which members can connect.")
+	fs.StringVar(&config.Router, "r", "", "Router who maintenance cluster info")
+	fs.StringVar(&config.Router, "router", "", "Router who maintenance cluster info")
+	fs.StringVar(&config.WsPort, "ws", "", "port for ws to listen on")
+	fs.StringVar(&config.WsPort, "wsport", "", "port for ws to listen on")
+	fs.StringVar(&config.WsPath, "wsp", "", "path for ws to listen on")
+	fs.StringVar(&config.WsPath, "wspath", "", "path for ws to listen on")
+	fs.StringVar(&configFile, "config", "", "config file for hmq")
+	fs.StringVar(&configFile, "c", "", "config file for hmq")
+	fs.BoolVar(&config.Debug, "debug", false, "enable Debug logging.")
+	fs.BoolVar(&config.Debug, "d", false, "enable Debug logging.")
+
+	fs.Bool("D", true, "enable Debug logging.")
+
+	if err := fs.Parse(args); err != nil {
+		return nil, err
+	}
+
+	if help {
+		showHelp()
+		return nil, nil
+	}
+
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "D":
+			// Check value to support -DV=false
+			config.Debug = true
+		}
+	})
+
+	logger.InitLogger(config.Debug)
+	brokerLog = logger.Get().Named("Broker")
 
 	if configFile != "" {
 		tmpConfig, e := LoadConfig(configFile)
