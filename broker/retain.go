@@ -39,7 +39,7 @@ func (r *RetainList) Insert(topic string, buf *packets.PublishPacket) error {
 	if err != nil {
 		return err
 	}
-	// log.Info("insert tokens:", tokens)
+	// brokerLog.Info("insert tokens:", tokens)
 	r.Lock()
 
 	l := r.root
@@ -72,7 +72,7 @@ func (r *RetainList) Match(topic string) []*packets.PublishPacket {
 	l := r.root
 	matchRLevel(l, tokens, results)
 	r.Unlock()
-	// log.Info("results: ", results)
+	// brokerLog.Info("results: ", results)
 	return results.msg
 
 }
@@ -82,7 +82,7 @@ func matchRLevel(l *rlevel, toks []string, results *RetainResult) {
 		if l == nil {
 			return
 		}
-		// log.Info("l info :", l.nodes)
+		// brokerLog.Info("l info :", l.nodes)
 		if t == "#" {
 			for _, n := range l.nodes {
 				n.GetAll(results)
@@ -111,7 +111,7 @@ func matchRLevel(l *rlevel, toks []string, results *RetainResult) {
 }
 
 func (r *rnode) GetAll(results *RetainResult) {
-	// log.Info("node 's message: ", string(r.msg))
+	// brokerLog.Info("node 's message: ", string(r.msg))
 	if r.msg != nil {
 		results.msg = append(results.msg, r.msg)
 	}

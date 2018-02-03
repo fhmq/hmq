@@ -9,7 +9,6 @@ import (
 
 var (
 	// env can be setup at build time with Go Linker. Value could be prod or whatever else for dev env
-	env      string
 	instance *zap.Logger
 	logCfg   zap.Config
 )
@@ -28,13 +27,13 @@ func NewProdLogger() (*zap.Logger, error) {
 	return logCfg.Build()
 }
 
-func init() {
+func InitLogger(debug bool) {
 	var err error
 	var log *zap.Logger
-	if env == "prod" {
-		log, err = NewProdLogger()
-	} else {
+	if debug {
 		log, err = NewDevLogger()
+	} else {
+		log, err = NewProdLogger()
 	}
 	if err != nil {
 		panic("Unable to create a logger.")

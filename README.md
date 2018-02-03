@@ -16,43 +16,26 @@ $ go run main.go
 
 ## Usage of hmq:
 ~~~
-Usage of ./hmq:
-  -w int
-        worker num to process message, perfer (client num)/10. (default 1024)
-  -worker int
-        worker num to process message, perfer (client num)/10. (default 1024)
-  -h string
-        Network host to listen on. (default "0.0.0.0")
-  -host string
-        Network host to listen on. (default "0.0.0.0")
-  -p string
-        Port to listen on. (default "1883")
-  -port string
-        Port to listen on. (default "1883")
-  -c string
-        config file for hmq
-  -config string
-        config file for hmq
-  -cluster string
-        Cluster ip from which members can connect.
-  -cluster_listen string
-        Cluster ip from which members can connect.
-  -cluster_port string
-        Cluster port from which members can connect.
-  -cp string
-        Cluster port from which members can connect.
-  -r string
-        Router who maintenance cluster info
-  -router string
-        Router who maintenance cluster info
-  -ws_path string
-        path for ws to listen on
-  -ws_port string
-        port for ws to listen on
-  -wspath string
-        path for ws to listen on
-  -wsport string
-        port for ws to listen on
+Usage: hmq [options]
+
+Broker Options:
+    -w,  --worker <number>            Worker num to process message, perfer (client num)/10. (default 1024)
+    -p,  --port <port>                Use port for clients (default: 1883)
+         --host <host>                Network host to listen on. (default "0.0.0.0")
+    -ws, --wsport <port>              Use port for websocket monitoring
+    -wsp,--wspath <path>              Use path for websocket monitoring
+    -c,  --config <file>              Configuration file
+
+Logging Options:
+    -d, --debug <bool>                Enable debugging output (default false)
+    -D                                Debug and trace
+
+Cluster Options:
+    -r,  --router  <rurl>             Router who maintenance cluster info
+    -cp, --clusterport <cluster-port> Cluster listen port for others
+
+Common Options:
+    -h, --help                        Show this message
 ~~~
 
 ### hmq.config
@@ -105,6 +88,9 @@ Usage of ./hmq:
 ### Cluster
 ```bash
  1, start router for hmq  (https://github.com/fhmq/router.git)
+ 	$ go get github.com/fhmq/router
+ 	$ cd $GOPATH/github.com/fhmq/router
+ 	$ go run main.go
  2, config router in hmq.config  ("router": "127.0.0.1:9888")
  
 ```

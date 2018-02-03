@@ -7,36 +7,31 @@ copyright notice and this permission notice appear in all copies.
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/signal"
 	"runtime"
 
 	"github.com/fhmq/hmq/broker"
-	"github.com/fhmq/hmq/logger"
-	"go.uber.org/zap"
-)
-
-var (
-	log = logger.Get().Named("Main")
 )
 
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
-	config, err := broker.ConfigureConfig()
+	config, err := broker.ConfigureConfig(os.Args[1:])
 	if err != nil {
-		log.Error("configure broker config error: ", zap.Error(err))
+		fmt.Println("configure broker config error: ", err)
 		return
 	}
 
 	b, err := broker.NewBroker(config)
 	if err != nil {
-		log.Error("New Broker error: ", zap.Error(err))
+		fmt.Println("New Broker error: ", err)
 		return
 	}
 	b.Start()
 
 	s := waitForSignal()
-	log.Info("signal received, broker closed.", zap.Any("signal", s))
+	fmt.Println("signal received, broker closed.", s)
 }
 
 func waitForSignal() os.Signal {
