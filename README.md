@@ -28,7 +28,7 @@ Broker Options:
 
 Logging Options:
     -d, --debug <bool>                Enable debugging output (default false)
-    -D                                Debug and trace
+    -D                                Debug enabled
 
 Cluster Options:
     -r,  --router  <rurl>             Router who maintenance cluster info
