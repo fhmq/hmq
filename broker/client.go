@@ -86,7 +86,7 @@ func (c *client) init() {
 	c.info.remoteIP = strings.Split(c.conn.RemoteAddr().String(), ":")[0]
 }
 
-func (c *client) keepAlive(ch chan int, mpool chan *Message) {
+func (c *client) keepAlive(ch chan int) {
 	defer close(ch)
 	keepalive := time.Duration(c.info.keepalive*3/2) * time.Second
 	timer := time.NewTimer(keepalive)
@@ -100,9 +100,8 @@ func (c *client) keepAlive(ch chan int, mpool chan *Message) {
 				timer.Reset(keepalive)
 				continue
 			}
-			brokerLog.Error("Client exceeded timeout, disconnecting. ", zap.String("ClientID", c.info.clientID), zap.Uint16("keepalive", c.info.keepalive))
-			msg := &Message{client: c, packet: DisconnectdPacket}
-			mpool <- msg
+			log.Error("Client exceeded timeout, disconnecting. ", zap.String("ClientID", c.info.clientID), zap.Uint16("keepalive", c.info.keepalive))
+			c.broker.DispatchMessage(&Message{client: c, packet: DisconnectdPacket})
 			timer.Stop()
 			return
 		case _, ok := <-c.closed:
@@ -113,33 +112,31 @@ func (c *client) keepAlive(ch chan int, mpool chan *Message) {
 	}
 }
 
-func (c *client) readLoop(mpool chan *Message) {
+func (c *client) readLoop() {
 	nc := c.conn
-	if nc == nil || mpool == nil {
+	if nc == nil {
 		return
 	}
 
 	ch := make(chan int, 1000)
-	go c.keepAlive(ch, mpool)
+	go c.keepAlive(ch)
 
 	for {
 		packet, err := packets.ReadPacket(nc)
 		if err != nil {
-			brokerLog.Error("read packet error: ", zap.Error(err), zap.String("ClientID", c.info.clientID))
+			log.Error("read packet error: ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 			break
 		}
 		// keepalive channel
 		ch <- 1
 
-		msg := &Message{
+		c.broker.DispatchMessage(&Message{
 			client: c,
 			packet: packet,
-		}
-		mpool <- msg
+		})
 	}
 
-	msg := &Message{client: c, packet: DisconnectdPacket}
-	mpool <- msg
+	c.broker.DispatchMessage(&Message{client: c, packet: DisconnectdPacket})
 }
 
 func ProcessMessage(msg *Message) {
@@ -149,7 +146,7 @@ func ProcessMessage(msg *Message) {
 		return
 	}
 
-	brokerLog.Debug("Recv message:", zap.String("message type", reflect.TypeOf(msg.packet).String()[9:]), zap.String("ClientID", c.info.clientID))
+	log.Debug("Recv message:", zap.String("message type", reflect.TypeOf(msg.packet).String()[9:]), zap.String("ClientID", c.info.clientID))
 	switch ca.(type) {
 	case *packets.ConnackPacket:
 	case *packets.ConnectPacket:
@@ -174,7 +171,7 @@ func ProcessMessage(msg *Message) {
 	case *packets.DisconnectPacket:
 		c.Close()
 	default:
-		brokerLog.Info("Recv Unknow message.......", zap.String("ClientID", c.info.clientID))
+		log.Info("Recv Unknow message.......", zap.String("ClientID", c.info.clientID))
 	}
 }
 
@@ -190,7 +187,7 @@ func (c *client) ProcessPublish(packet *packets.PublishPacket) {
 	}
 
 	if !c.CheckTopicAuth(PUB, topic) {
-		brokerLog.Error("Pub Topics Auth failed, ", zap.String("topic", topic), zap.String("ClientID", c.info.clientID))
+		log.Error("Pub Topics Auth failed, ", zap.String("topic", topic), zap.String("ClientID", c.info.clientID))
 		return
 	}
 
@@ -201,21 +198,21 @@ func (c *client) ProcessPublish(packet *packets.PublishPacket) {
 		puback := packets.NewControlPacket(packets.Puback).(*packets.PubackPacket)
 		puback.MessageID = packet.MessageID
 		if err := c.WriterPacket(puback); err != nil {
-			brokerLog.Error("send puback error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
+			log.Error("send puback error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 			return
 		}
 		c.ProcessPublishMessage(packet)
 	case QosExactlyOnce:
 		return
 	default:
-		brokerLog.Error("publish with unknown qos", zap.String("ClientID", c.info.clientID))
+		log.Error("publish with unknown qos", zap.String("ClientID", c.info.clientID))
 		return
 	}
 	if packet.Retain {
 		if b := c.broker; b != nil {
 			err := b.rl.Insert(topic, packet)
 			if err != nil {
-				brokerLog.Error("Insert Retain Message error: ", zap.Error(err), zap.String("ClientID", c.info.clientID))
+				log.Error("Insert Retain Message error: ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 			}
 		}
 	}
@@ -235,7 +232,7 @@ func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) {
 	topic := packet.TopicName
 
 	r := b.sl.Match(topic)
-	// brokerLog.Info("psubs num: ", len(r.psubs))
+	// log.Info("psubs num: ", len(r.psubs))
 	if len(r.qsubs) == 0 && len(r.psubs) == 0 {
 		return
 	}
@@ -249,7 +246,7 @@ func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) {
 		if sub != nil {
 			err := sub.client.WriterPacket(packet)
 			if err != nil {
-				brokerLog.Error("process message for psub error,  ", zap.Error(err), zap.String("ClientID", c.info.clientID))
+				log.Error("process message for psub error,  ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 			}
 		}
 	}
@@ -259,7 +256,7 @@ func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) {
 	t := "$queue/" + topic
 	cnt, exist := b.queues[t]
 	if exist {
-		// brokerLog.Info("queue index : ", cnt)
+		// log.Info("queue index : ", cnt)
 		for _, sub := range r.qsubs {
 			if sub.client.typ == ROUTER {
 				if typ != CLIENT {
@@ -275,7 +272,7 @@ func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) {
 				if sub != nil {
 					err := sub.client.WriterPacket(packet)
 					if err != nil {
-						brokerLog.Error("send publish error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
+						log.Error("send publish error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 					}
 				}
 
@@ -329,7 +326,7 @@ func (c *client) ProcessSubscribe(packet *packets.SubscribePacket) {
 		t := topic
 		//check topic auth for client
 		if !c.CheckTopicAuth(SUB, topic) {
-			brokerLog.Error("Sub topic Auth failed: ", zap.String("topic", topic), zap.String("ClientID", c.info.clientID))
+			log.Error("Sub topic Auth failed: ", zap.String("topic", topic), zap.String("ClientID", c.info.clientID))
 			retcodes = append(retcodes, QosFailure)
 			continue
 		}
@@ -376,7 +373,7 @@ func (c *client) ProcessSubscribe(packet *packets.SubscribePacket) {
 		}
 		err := b.sl.Insert(sub)
 		if err != nil {
-			brokerLog.Error("Insert subscription error: ", zap.Error(err), zap.String("ClientID", c.info.clientID))
+			log.Error("Insert subscription error: ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 			retcodes = append(retcodes, QosFailure)
 		} else {
 			retcodes = append(retcodes, qoss[i])
@@ -386,7 +383,7 @@ func (c *client) ProcessSubscribe(packet *packets.SubscribePacket) {
 
 	err := c.WriterPacket(suback)
 	if err != nil {
-		brokerLog.Error("send suback error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
+		log.Error("send suback error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 		return
 	}
 	//broadcast subscribe message
@@ -398,7 +395,7 @@ func (c *client) ProcessSubscribe(packet *packets.SubscribePacket) {
 	for _, t := range topics {
 		packets := b.rl.Match(t)
 		for _, packet := range packets {
-			brokerLog.Info("process retain  message: ", zap.Any("packet", packet), zap.String("ClientID", c.info.clientID))
+			log.Info("process retain  message: ", zap.Any("packet", packet), zap.String("ClientID", c.info.clientID))
 			if packet != nil {
 				c.WriterPacket(packet)
 			}
@@ -445,7 +442,7 @@ func (c *client) ProcessUnSubscribe(packet *packets.UnsubscribePacket) {
 
 	err := c.WriterPacket(unsuback)
 	if err != nil {
-		brokerLog.Error("send unsuback error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
+		log.Error("send unsuback error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 		return
 	}
 	// //process ubsubscribe message
@@ -474,7 +471,7 @@ func (c *client) ProcessPing() {
 	resp := packets.NewControlPacket(packets.Pingresp).(*packets.PingrespPacket)
 	err := c.WriterPacket(resp)
 	if err != nil {
-		brokerLog.Error("send PingResponse error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
+		log.Error("send PingResponse error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 		return
 	}
 }
@@ -505,7 +502,7 @@ func (c *client) Close() {
 		for _, sub := range subs {
 			err := b.sl.Remove(sub)
 			if err != nil {
-				brokerLog.Error("closed client but remove sublist error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
+				log.Error("closed client but remove sublist error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 			}
 		}
 		if c.typ == CLIENT {

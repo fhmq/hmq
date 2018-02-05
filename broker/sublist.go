@@ -211,7 +211,7 @@ func (s *Sublist) Match(topic string) *SublistResult {
 
 	tokens, err := PublishTopicCheckAndSpilt(topic)
 	if err != nil {
-		brokerLog.Error("\tserver/sublist.go: ", zap.Error(err))
+		log.Error("\tserver/sublist.go: ", zap.Error(err))
 		return nil
 	}
 
