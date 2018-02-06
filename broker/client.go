@@ -527,7 +527,7 @@ func (c *client) Close() {
 }
 
 func (c *client) WriterPacket(packet packets.ControlPacket) error {
-	if packet == nil {
+	if c == nil || packet == nil {
 		return nil
 	}
 
