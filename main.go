@@ -13,6 +13,7 @@ import (
 	"runtime"
 
 	"github.com/fhmq/hmq/broker"
+	"github.com/fhmq/hmq/logger"
 )
 
 func main() {
@@ -22,8 +23,8 @@ func main() {
 		fmt.Println("configure broker config error: ", err)
 		return
 	}
-
-	b, err := broker.NewBroker(config)
+	logger.InitLogger(config.Debug)
+	b, err := broker.NewBroker(config, logger.Get())
 	if err != nil {
 		fmt.Println("New Broker error: ", err)
 		return

@@ -19,15 +19,11 @@ func TestGet(t *testing.T) {
 }
 
 func TestNewDevLogger(t *testing.T) {
-	logger, err := NewDevLogger()
-
-	assert.Nil(t, err)
-	assert.True(t, logger.Core().Enabled(zap.DebugLevel))
+	InitDevLogger()
+	assert.True(t, Get().Core().Enabled(zap.DebugLevel))
 }
 
 func TestNewProdLogger(t *testing.T) {
-	logger, err := NewProdLogger()
-
-	assert.Nil(t, err)
-	assert.False(t, logger.Core().Enabled(zap.DebugLevel))
+	InitProdLogger()
+	assert.False(t, Get().Core().Enabled(zap.DebugLevel))
 }

@@ -47,7 +47,8 @@ type Broker struct {
 	queues     map[string]int
 }
 
-func NewBroker(config *Config) (*Broker, error) {
+func NewBroker(config *Config, logger *zap.Logger) (*Broker, error) {
+	log = logger
 	b := &Broker{
 		id:         GenUniqueId(),
 		config:     config,

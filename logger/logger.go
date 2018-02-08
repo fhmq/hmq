@@ -8,43 +8,40 @@ import (
 )
 
 var (
-	// env can be setup at build time with Go Linker. Value could be prod or whatever else for dev env
-	instance *zap.Logger
-	logCfg   zap.Config
+	logInstance *zap.Logger
 )
 
-// NewDevLogger return a logger for dev builds
-func NewDevLogger() (*zap.Logger, error) {
+// InitDevLogger instanciate a logger for dev builds
+func InitDevLogger() {
 	logCfg := zap.NewDevelopmentConfig()
-	return logCfg.Build()
+	logInstance, _ = logCfg.Build()
 }
 
-// NewProdLogger return a logger for production builds
-func NewProdLogger() (*zap.Logger, error) {
+// InitProdLogger instanciate a logger for production builds
+func InitProdLogger() {
 	logCfg := zap.NewProductionConfig()
 	logCfg.DisableStacktrace = true
 	logCfg.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
-	return logCfg.Build()
+	logInstance, _ = logCfg.Build()
 }
 
 func InitLogger(debug bool) {
 	var err error
-	var log *zap.Logger
 	if debug {
-		log, err = NewDevLogger()
+		InitDevLogger()
 	} else {
-		log, err = NewProdLogger()
+		InitProdLogger()
 	}
 	if err != nil {
 		panic("Unable to create a logger.")
 	}
-	defer log.Sync()
-
-	log.Debug("Logger initialization succeeded")
-	instance = log.Named("hmq")
+	logInstance.Debug("Logger initialization succeeded")
 }
 
-// Get return a *zap.Logger instance
+// Get the existing *zap.Logger instance. If none have been created, it'll instanciate de dev logger
 func Get() *zap.Logger {
-	return instance
+	if logInstance == nil {
+		InitDevLogger()
+	}
+	return logInstance
 }
