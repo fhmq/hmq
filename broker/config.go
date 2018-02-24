@@ -9,11 +9,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io/ioutil"
-	"os"
-
 	"github.com/fhmq/hmq/logger"
 	"go.uber.org/zap"
+	"io/ioutil"
+	"os"
 )
 
 type Config struct {
@@ -51,6 +50,10 @@ var DefaultConfig *Config = &Config{
 	Port:   "1883",
 	Acl:    false,
 }
+
+var (
+	log *zap.Logger
+)
 
 func showHelp() {
 	fmt.Printf("%s\n", usageStr)
@@ -105,7 +108,7 @@ func ConfigureConfig(args []string) (*Config, error) {
 	})
 
 	logger.InitLogger(config.Debug)
-	brokerLog = logger.Get().Named("Broker")
+	log = logger.Get().Named("Broker")
 
 	if configFile != "" {
 		tmpConfig, e := LoadConfig(configFile)
@@ -128,15 +131,15 @@ func LoadConfig(filename string) (*Config, error) {
 
 	content, err := ioutil.ReadFile(filename)
 	if err != nil {
-		brokerLog.Error("Read config file error: ", zap.Error(err))
+		log.Error("Read config file error: ", zap.Error(err))
 		return nil, err
 	}
-	// brokerLog.Info(string(content))
+	// log.Info(string(content))
 
 	var config Config
 	err = json.Unmarshal(content, &config)
 	if err != nil {
-		brokerLog.Error("Unmarshal config file error: ", zap.Error(err))
+		log.Error("Unmarshal config file error: ", zap.Error(err))
 		return nil, err
 	}
 
@@ -168,7 +171,7 @@ func (config *Config) check() error {
 
 	if config.TlsPort != "" {
 		if config.TlsInfo.CertFile == "" || config.TlsInfo.KeyFile == "" {
-			brokerLog.Error("tls config error, no cert or key file.")
+			log.Error("tls config error, no cert or key file.")
 			return errors.New("tls config error, no cert or key file.")
 		}
 		if config.TlsHost == "" {

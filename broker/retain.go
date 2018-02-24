@@ -1,9 +1,8 @@
 package broker
 
 import (
-	"sync"
-
 	"github.com/eclipse/paho.mqtt.golang/packets"
+	"sync"
 )
 
 type RetainList struct {
@@ -39,7 +38,7 @@ func (r *RetainList) Insert(topic string, buf *packets.PublishPacket) error {
 	if err != nil {
 		return err
 	}
-	// brokerLog.Info("insert tokens:", tokens)
+	// log.Info("insert tokens:", tokens)
 	r.Lock()
 
 	l := r.root
@@ -72,7 +71,7 @@ func (r *RetainList) Match(topic string) []*packets.PublishPacket {
 	l := r.root
 	matchRLevel(l, tokens, results)
 	r.Unlock()
-	// brokerLog.Info("results: ", results)
+	// log.Info("results: ", results)
 	return results.msg
 
 }
@@ -82,7 +81,7 @@ func matchRLevel(l *rlevel, toks []string, results *RetainResult) {
 		if l == nil {
 			return
 		}
-		// brokerLog.Info("l info :", l.nodes)
+		// log.Info("l info :", l.nodes)
 		if t == "#" {
 			for _, n := range l.nodes {
 				n.GetAll(results)
@@ -111,7 +110,7 @@ func matchRLevel(l *rlevel, toks []string, results *RetainResult) {
 }
 
 func (r *rnode) GetAll(results *RetainResult) {
-	// brokerLog.Info("node 's message: ", string(r.msg))
+	// log.Info("node 's message: ", string(r.msg))
 	if r.msg != nil {
 		results.msg = append(results.msg, r.msg)
 	}

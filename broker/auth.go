@@ -3,13 +3,10 @@
 package broker
 
 import (
-	"strings"
-
 	"github.com/fhmq/hmq/lib/acl"
-
-	"go.uber.org/zap"
-
 	"github.com/fsnotify/fsnotify"
+	"go.uber.org/zap"
+	"strings"
 )
 
 const (
@@ -44,10 +41,10 @@ func (b *Broker) handleFsEvent(event fsnotify.Event) error {
 	case b.config.AclConf:
 		if event.Op&fsnotify.Write == fsnotify.Write ||
 			event.Op&fsnotify.Create == fsnotify.Create {
-			brokerLog.Info("text:handling acl config change event:", zap.String("filename", event.Name))
+			log.Info("text:handling acl config change event:", zap.String("filename", event.Name))
 			aclconfig, err := acl.AclConfigLoad(event.Name)
 			if err != nil {
-				brokerLog.Error("aclconfig change failed, load acl conf error: ", zap.Error(err))
+				log.Error("aclconfig change failed, load acl conf error: ", zap.Error(err))
 				return err
 			}
 			b.AclConfig = aclconfig
@@ -60,24 +57,24 @@ func (b *Broker) StartAclWatcher() {
 	go func() {
 		wch, e := fsnotify.NewWatcher()
 		if e != nil {
-			brokerLog.Error("start monitor acl config file error,", zap.Error(e))
+			log.Error("start monitor acl config file error,", zap.Error(e))
 			return
 		}
 		defer wch.Close()
 
 		for _, i := range watchList {
 			if err := wch.Add(i); err != nil {
-				brokerLog.Error("start monitor acl config file error,", zap.Error(err))
+				log.Error("start monitor acl config file error,", zap.Error(err))
 				return
 			}
 		}
-		brokerLog.Info("watching acl config file change...")
+		log.Info("watching acl config file change...")
 		for {
 			select {
 			case evt := <-wch.Events:
 				b.handleFsEvent(evt)
 			case err := <-wch.Errors:
-				brokerLog.Error("error:", zap.Error(err))
+				log.Error("error:", zap.Error(err))
 			}
 		}
 	}()

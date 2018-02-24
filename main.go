@@ -8,11 +8,10 @@ package main
 
 import (
 	"fmt"
+	"github.com/fhmq/hmq/broker"
 	"os"
 	"os/signal"
 	"runtime"
-
-	"github.com/fhmq/hmq/broker"
 )
 
 func main() {
