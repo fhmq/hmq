@@ -67,7 +67,7 @@ func NewBroker(config *Config) (*Broker, error) {
 		nodes:       make(map[string]interface{}),
 		queues:      make(map[string]int),
 		clusterPool: make(chan *Message),
-		messagePool: newMessagePool(),
+		// messagePool: newMessagePool(),
 	}
 	if b.config.TlsPort != "" {
 		tlsconfig, err := NewTLSConfig(b.config.TlsInfo)
@@ -105,6 +105,16 @@ func NewBroker(config *Config) (*Broker, error) {
 // 		}(mpool)
 // 	}
 // }
+
+func (b *Broker) SubmitWork(msg *Message) {
+	if b.wpool == nil {
+		b.wpool = pool.New(b.config.Worker)
+	}
+
+	b.wpool.Submit(func() {
+		ProcessMessage(msg)
+	})
+}
 
 func (b *Broker) Start() {
 	if b == nil {

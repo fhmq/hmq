@@ -104,11 +104,10 @@ func (c *client) keepAlive(ch chan int) {
 				continue
 			}
 			log.Error("Client exceeded timeout, disconnecting. ", zap.String("ClientID", c.info.clientID), zap.Uint16("keepalive", c.info.keepalive))
+
 			msg := &Message{client: c, packet: DisconnectdPacket}
-			// mpool <- msg
-			b.wpool.Submit(func() {
-				ProcessMessage(msg)
-			})
+			b.SubmitWork(msg)
+
 			timer.Stop()
 			return
 		case _, ok := <-c.closed:
@@ -142,17 +141,11 @@ func (c *client) readLoop() {
 			client: c,
 			packet: packet,
 		}
-		// mpool <- msg
-		b.wpool.Submit(func() {
-			ProcessMessage(msg)
-		})
+		b.SubmitWork(msg)
 	}
 
 	msg := &Message{client: c, packet: DisconnectdPacket}
-	// mpool <- msg
-	b.wpool.Submit(func() {
-		ProcessMessage(msg)
-	})
+	b.SubmitWork(msg)
 }
 
 func ProcessMessage(msg *Message) {
