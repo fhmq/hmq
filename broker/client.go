@@ -3,13 +3,14 @@
 package broker
 
 import (
-	"github.com/eclipse/paho.mqtt.golang/packets"
-	"go.uber.org/zap"
 	"net"
 	"reflect"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/eclipse/paho.mqtt.golang/packets"
+	"go.uber.org/zap"
 )
 
 const (
@@ -85,8 +86,11 @@ func (c *client) init() {
 	c.info.remoteIP = strings.Split(c.conn.RemoteAddr().String(), ":")[0]
 }
 
-func (c *client) keepAlive(ch chan int, mpool chan *Message) {
+func (c *client) keepAlive(ch chan int) {
 	defer close(ch)
+
+	b := c.broker
+
 	keepalive := time.Duration(c.info.keepalive*3/2) * time.Second
 	timer := time.NewTimer(keepalive)
 
@@ -101,7 +105,10 @@ func (c *client) keepAlive(ch chan int, mpool chan *Message) {
 			}
 			log.Error("Client exceeded timeout, disconnecting. ", zap.String("ClientID", c.info.clientID), zap.Uint16("keepalive", c.info.keepalive))
 			msg := &Message{client: c, packet: DisconnectdPacket}
-			mpool <- msg
+			// mpool <- msg
+			b.wpool.Submit(func() {
+				ProcessMessage(msg)
+			})
 			timer.Stop()
 			return
 		case _, ok := <-c.closed:
@@ -112,14 +119,15 @@ func (c *client) keepAlive(ch chan int, mpool chan *Message) {
 	}
 }
 
-func (c *client) readLoop(mpool chan *Message) {
+func (c *client) readLoop() {
 	nc := c.conn
-	if nc == nil || mpool == nil {
+	b := c.broker
+	if nc == nil || b == nil {
 		return
 	}
 
 	ch := make(chan int, 1000)
-	go c.keepAlive(ch, mpool)
+	go c.keepAlive(ch)
 
 	for {
 		packet, err := packets.ReadPacket(nc)
@@ -134,11 +142,17 @@ func (c *client) readLoop(mpool chan *Message) {
 			client: c,
 			packet: packet,
 		}
-		mpool <- msg
+		// mpool <- msg
+		b.wpool.Submit(func() {
+			ProcessMessage(msg)
+		})
 	}
 
 	msg := &Message{client: c, packet: DisconnectdPacket}
-	mpool <- msg
+	// mpool <- msg
+	b.wpool.Submit(func() {
+		ProcessMessage(msg)
+	})
 }
 
 func ProcessMessage(msg *Message) {
