@@ -4,19 +4,19 @@ package broker
 
 import (
 	"crypto/tls"
-	"github.com/eclipse/paho.mqtt.golang/packets"
-	"github.com/fhmq/hmq/lib/acl"
-	"github.com/fhmq/hmq/pool"
-	"github.com/segmentio/fasthash/fnv1a"
-	"github.com/shirou/gopsutil/mem"
-	"go.uber.org/zap"
-	"golang.org/x/net/websocket"
 	"net"
 	"net/http"
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/eclipse/paho.mqtt.golang/packets"
+	"github.com/fhmq/hmq/lib/acl"
+	"github.com/fhmq/hmq/pool"
+	"github.com/shirou/gopsutil/mem"
+	"go.uber.org/zap"
+	"golang.org/x/net/websocket"
 )
 
 const (
@@ -42,10 +42,10 @@ type Broker struct {
 	remotes     sync.Map
 	nodes       map[string]interface{}
 	clusterPool chan *Message
-	messagePool []chan *Message
 	sl          *Sublist
 	rl          *RetainList
 	queues      map[string]int
+	// messagePool []chan *Message
 }
 
 func newMessagePool() []chan *Message {
@@ -67,7 +67,7 @@ func NewBroker(config *Config) (*Broker, error) {
 		nodes:       make(map[string]interface{}),
 		queues:      make(map[string]int),
 		clusterPool: make(chan *Message),
-		messagePool: newMessagePool(),
+		// messagePool: newMessagePool(),
 	}
 	if b.config.TlsPort != "" {
 		tlsconfig, err := NewTLSConfig(b.config.TlsInfo)
@@ -89,20 +89,17 @@ func NewBroker(config *Config) (*Broker, error) {
 	return b, nil
 }
 
-func (b *Broker) StartDispatcher() {
-	for _, mpool := range b.messagePool {
-		go func(ch chan *Message) {
-			for {
-				msg, ok := <-ch
-				if !ok {
-					log.Error("read message from client channel error")
-					return
-				}
-				b.wpool.Submit(func() {
-					ProcessMessage(msg)
-				})
-			}
-		}(mpool)
+func (b *Broker) SubmitWork(msg *Message) {
+	if b.wpool == nil {
+		b.wpool = pool.New(b.config.Worker)
+	}
+
+	if msg.client.typ == CLUSTER {
+		b.clusterPool <- msg
+	} else {
+		b.wpool.Submit(func() {
+			ProcessMessage(msg)
+		})
 	}
 
 }
@@ -112,7 +109,6 @@ func (b *Broker) Start() {
 		log.Error("broker is null")
 		return
 	}
-	go b.StartDispatcher()
 
 	//listen clinet over tcp
 	if b.config.Port != "" {
@@ -365,9 +361,9 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) {
 		b.routes.Store(cid, c)
 	}
 
-	mpool := b.messagePool[fnv1a.HashString64(cid)%MessagePoolNum]
+	// mpool := b.messagePool[fnv1a.HashString64(cid)%MessagePoolNum]
 
-	c.readLoop(mpool)
+	c.readLoop()
 }
 
 func (b *Broker) ConnectToDiscovery() {
@@ -414,7 +410,7 @@ func (b *Broker) ConnectToDiscovery() {
 	c.SendConnect()
 	c.SendInfo()
 
-	go c.readLoop(b.clusterPool)
+	go c.readLoop()
 	go c.StartPing()
 }
 
@@ -490,8 +486,8 @@ func (b *Broker) connectRouter(id, addr string) {
 
 	c.SendConnect()
 
-	mpool := b.messagePool[fnv1a.HashString64(cid)%MessagePoolNum]
-	go c.readLoop(mpool)
+	// mpool := b.messagePool[fnv1a.HashString64(cid)%MessagePoolNum]
+	go c.readLoop()
 	go c.StartPing()
 
 }
