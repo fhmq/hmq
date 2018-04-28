@@ -3,6 +3,7 @@
 package broker
 
 import (
+	"errors"
 	"net"
 	"reflect"
 	"strings"
@@ -498,9 +499,11 @@ func (c *client) Close() {
 		c.smu.Unlock()
 		return
 	}
+
+	c.status = Disconnected
 	//wait for message complete
 	time.Sleep(1 * time.Second)
-	c.status = Disconnected
+	// c.status = Disconnected
 
 	if c.conn != nil {
 		c.conn.Close()
@@ -540,8 +543,16 @@ func (c *client) Close() {
 }
 
 func (c *client) WriterPacket(packet packets.ControlPacket) error {
-	if c == nil || packet == nil {
+	if c.status == Disconnected {
 		return nil
+	}
+
+	if packet == nil {
+		return nil
+	}
+	if c.conn == nil {
+		c.Close()
+		return errors.New("connect lost ....")
 	}
 
 	c.mu.Lock()
