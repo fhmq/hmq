@@ -241,6 +241,10 @@ func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) {
 	topic := packet.TopicName
 
 	r := b.sl.Match(topic)
+	if r == nil {
+		return
+	}
+
 	// log.Info("psubs num: ", len(r.psubs))
 	if len(r.qsubs) == 0 && len(r.psubs) == 0 {
 		return
@@ -403,6 +407,9 @@ func (c *client) ProcessSubscribe(packet *packets.SubscribePacket) {
 	//process retain message
 	for _, t := range topics {
 		packets := b.rl.Match(t)
+		if packets == nil {
+			continue
+		}
 		for _, packet := range packets {
 			log.Info("process retain  message: ", zap.Any("packet", packet), zap.String("ClientID", c.info.clientID))
 			if packet != nil {
