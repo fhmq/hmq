@@ -4,10 +4,11 @@ package broker
 
 import (
 	"fmt"
+	"time"
+
 	simplejson "github.com/bitly/go-simplejson"
 	"github.com/eclipse/paho.mqtt.golang/packets"
 	"go.uber.org/zap"
-	"time"
 )
 
 func (c *client) SendInfo() {
@@ -35,10 +36,8 @@ func (c *client) StartPing() {
 				log.Error("ping error: ", zap.Error(err))
 				c.Close()
 			}
-		case _, ok := <-c.closed:
-			if !ok {
-				return
-			}
+		case <-c.ctx.Done():
+			return
 		}
 	}
 }
