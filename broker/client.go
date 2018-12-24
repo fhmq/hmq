@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/eclipse/paho.mqtt.golang/packets"
+	"github.com/fhmq/hmq/sessions"
+	"github.com/fhmq/hmq/topics"
 	"go.uber.org/zap"
 )
 
@@ -39,11 +41,14 @@ type client struct {
 	info       info
 	route      route
 	status     int
-	smu        sync.RWMutex
-	subs       map[string]*subscription
-	rsubs      map[string]*subInfo
 	ctx        context.Context
 	cancelFunc context.CancelFunc
+	session    *sessions.Session
+	subMap     map[string]*subscription
+	topicsMgr  *topics.Manager
+	subs       []interface{}
+	qoss       []byte
+	rmsgs      []*packets.PublishPacket
 }
 
 type subInfo struct {
@@ -78,44 +83,12 @@ var (
 )
 
 func (c *client) init() {
-	c.smu.Lock()
-	defer c.smu.Unlock()
 	c.status = Connected
-	c.rsubs = make(map[string]*subInfo)
-	c.subs = make(map[string]*subscription, 10)
 	c.info.localIP = strings.Split(c.conn.LocalAddr().String(), ":")[0]
 	c.info.remoteIP = strings.Split(c.conn.RemoteAddr().String(), ":")[0]
 	c.ctx, c.cancelFunc = context.WithCancel(context.Background())
-}
 
-func (c *client) keepAlive(ch chan int) {
-	defer close(ch)
-
-	b := c.broker
-
-	keepalive := time.Duration(c.info.keepalive*3/2) * time.Second
-	timer := time.NewTimer(keepalive)
-
-	for {
-		select {
-		case <-ch:
-			timer.Reset(keepalive)
-		case <-timer.C:
-			if c.typ == REMOTE || c.typ == CLUSTER {
-				timer.Reset(keepalive)
-				continue
-			}
-			log.Error("Client exceeded timeout, disconnecting. ", zap.String("ClientID", c.info.clientID), zap.Uint16("keepalive", c.info.keepalive))
-
-			msg := &Message{client: c, packet: DisconnectdPacket}
-			b.SubmitWork(msg)
-
-			timer.Stop()
-			return
-		case <-c.ctx.Done():
-			return
-		}
-	}
+	c.topicsMgr = c.broker.topicsMgr
 }
 
 func (c *client) readLoop() {
@@ -125,14 +98,20 @@ func (c *client) readLoop() {
 		return
 	}
 
-	ch := make(chan int, 1000)
-	go c.keepAlive(ch)
+	keepAlive := time.Second * time.Duration(c.info.keepalive)
+	timeOut := keepAlive + (keepAlive / 2)
 
 	for {
 		select {
 		case <-c.ctx.Done():
 			return
 		default:
+			//add read timeout
+			if err := nc.SetReadDeadline(time.Now().Add(timeOut)); err != nil {
+				log.Error("set read timeout error: ", zap.Error(err), zap.String("ClientID", c.info.clientID))
+				return
+			}
+
 			packet, err := packets.ReadPacket(nc)
 			if err != nil {
 				log.Error("read packet error: ", zap.Error(err), zap.String("ClientID", c.info.clientID))
@@ -140,8 +119,6 @@ func (c *client) readLoop() {
 				b.SubmitWork(msg)
 				return
 			}
-			// keepalive channel
-			ch <- 1
 
 			msg := &Message{
 				client: c,
@@ -159,7 +136,6 @@ func ProcessMessage(msg *Message) {
 	if ca == nil {
 		return
 	}
-
 	log.Debug("Recv message:", zap.String("message type", reflect.TypeOf(msg.packet).String()[9:]), zap.String("ClientID", c.info.clientID))
 	switch ca.(type) {
 	case *packets.ConnackPacket:
@@ -222,14 +198,6 @@ func (c *client) ProcessPublish(packet *packets.PublishPacket) {
 		log.Error("publish with unknown qos", zap.String("ClientID", c.info.clientID))
 		return
 	}
-	if packet.Retain {
-		if b := c.broker; b != nil {
-			err := b.rl.Insert(topic, packet)
-			if err != nil {
-				log.Error("Insert Retain Message error: ", zap.Error(err), zap.String("ClientID", c.info.clientID))
-			}
-		}
-	}
 
 }
 
@@ -243,85 +211,41 @@ func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) {
 		return
 	}
 	typ := c.typ
-	topic := packet.TopicName
 
-	r := b.sl.Match(topic)
-	if r == nil {
+	if packet.Retain {
+		if err := c.topicsMgr.Retain(packet); err != nil {
+			log.Error("Error retaining message: ", zap.Error(err), zap.String("ClientID", c.info.clientID))
+		}
+	}
+
+	err := c.topicsMgr.Subscribers([]byte(packet.TopicName), packet.Qos, &c.subs, &c.qoss)
+	if err != nil {
+		log.Error("Error retrieving subscribers list: ", zap.String("ClientID", c.info.clientID))
 		return
 	}
 
 	// log.Info("psubs num: ", len(r.psubs))
-	if len(r.qsubs) == 0 && len(r.psubs) == 0 {
+	if len(c.subs) == 0 {
 		return
 	}
 
-	for _, sub := range r.psubs {
-		if sub.client.typ == ROUTER {
-			if typ != CLIENT {
-				continue
-			}
-		}
-		if sub != nil {
-			err := sub.client.WriterPacket(packet)
-			if err != nil {
-				log.Error("process message for psub error,  ", zap.Error(err), zap.String("ClientID", c.info.clientID))
-			}
-		}
-	}
-
-	pre := -1
-	now := -1
-	t := "$queue/" + topic
-	cnt, exist := b.queues[t]
-	if exist {
-		// log.Info("queue index : ", cnt)
-		for _, sub := range r.qsubs {
-			if sub.client.typ == ROUTER {
+	for _, sub := range c.subs {
+		s, ok := sub.(*subscription)
+		if ok {
+			if s.client.typ == ROUTER {
 				if typ != CLIENT {
 					continue
 				}
 			}
-			if c.typ == CLIENT {
-				now = now + 1
-			} else {
-				now = now + sub.client.rsubs[t].num
+
+			err := s.client.WriterPacket(packet)
+			if err != nil {
+				log.Error("process message for psub error,  ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 			}
-			if cnt > pre && cnt <= now {
-				if sub != nil {
-					err := sub.client.WriterPacket(packet)
-					if err != nil {
-						log.Error("send publish error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
-					}
-				}
-
-				break
-			}
-			pre = now
 		}
+
 	}
 
-	length := getQueueSubscribeNum(r.qsubs)
-	if length > 0 {
-		b.queues[t] = (b.queues[t] + 1) % length
-	}
-}
-
-func getQueueSubscribeNum(qsubs []*subscription) int {
-	topic := "$queue/"
-	if len(qsubs) < 1 {
-		return 0
-	} else {
-		topic = topic + qsubs[0].topic
-	}
-	num := 0
-	for _, sub := range qsubs {
-		if sub.client.typ == CLIENT {
-			num = num + 1
-		} else {
-			num = num + sub.client.rsubs[topic].num
-		}
-	}
-	return num
 }
 
 func (c *client) ProcessSubscribe(packet *packets.SubscribePacket) {
@@ -349,54 +273,24 @@ func (c *client) ProcessSubscribe(packet *packets.SubscribePacket) {
 			continue
 		}
 
-		queue := strings.HasPrefix(topic, "$queue/")
-		if queue {
-			if len(t) > 7 {
-				t = t[7:]
-				if _, exists := b.queues[topic]; !exists {
-					b.queues[topic] = 0
-				}
-			} else {
-				retcodes = append(retcodes, QosFailure)
-				continue
-			}
-		}
 		sub := &subscription{
 			topic:  t,
 			qos:    qoss[i],
 			client: c,
-			queue:  queue,
 		}
-		switch c.typ {
-		case CLIENT:
-			if _, exist := c.subs[topic]; !exist {
-				c.subs[topic] = sub
 
-			} else {
-				//if exist ,check whether qos change
-				c.subs[topic].qos = qoss[i]
-				retcodes = append(retcodes, qoss[i])
-				continue
-			}
-		case ROUTER:
-			if subinfo, exist := c.rsubs[topic]; !exist {
-				sinfo := &subInfo{sub: sub, num: 1}
-				c.rsubs[topic] = sinfo
-
-			} else {
-				subinfo.num = subinfo.num + 1
-				retcodes = append(retcodes, qoss[i])
-				continue
-			}
-		}
-		err := b.sl.Insert(sub)
+		rqos, err := c.topicsMgr.Subscribe([]byte(topic), qoss[i], sub)
 		if err != nil {
-			log.Error("Insert subscription error: ", zap.Error(err), zap.String("ClientID", c.info.clientID))
-			retcodes = append(retcodes, QosFailure)
-		} else {
-			retcodes = append(retcodes, qoss[i])
+			return
 		}
+
+		c.subMap[topic] = sub
+		c.session.AddTopic(topic, qoss[i])
+		retcodes = append(retcodes, rqos)
+		c.topicsMgr.Retained([]byte(topic), &c.rmsgs)
+
 	}
+
 	suback.ReturnCodes = retcodes
 
 	err := c.WriterPacket(suback)
@@ -410,16 +304,11 @@ func (c *client) ProcessSubscribe(packet *packets.SubscribePacket) {
 	}
 
 	//process retain message
-	for _, t := range topics {
-		packets := b.rl.Match(t)
-		if packets == nil {
-			continue
-		}
-		for _, packet := range packets {
+	for _, rm := range c.rmsgs {
+		if err := c.WriterPacket(rm); err != nil {
+			log.Error("Error publishing retained message:", zap.Any("err", err), zap.String("ClientID", c.info.clientID))
+		} else {
 			log.Info("process retain  message: ", zap.Any("packet", packet), zap.String("ClientID", c.info.clientID))
-			if packet != nil {
-				c.WriterPacket(packet)
-			}
 		}
 	}
 }
@@ -432,30 +321,16 @@ func (c *client) ProcessUnSubscribe(packet *packets.UnsubscribePacket) {
 	if b == nil {
 		return
 	}
-	typ := c.typ
 	topics := packet.Topics
 
-	for _, t := range topics {
-
-		switch typ {
-		case CLIENT:
-			sub, ok := c.subs[t]
-			if ok {
-				c.unsubscribe(sub)
-			}
-		case ROUTER:
-			subinfo, ok := c.rsubs[t]
-			if ok {
-				subinfo.num = subinfo.num - 1
-				if subinfo.num < 1 {
-					delete(c.rsubs, t)
-					c.unsubscribe(subinfo.sub)
-				} else {
-					c.rsubs[t] = subinfo
-				}
-			}
+	for _, topic := range topics {
+		t := []byte(topic)
+		sub, exist := c.subMap[topic]
+		if exist {
+			c.topicsMgr.Unsubscribe(t, sub)
+			c.session.RemoveTopic(topic)
+			delete(c.subMap, topic)
 		}
-
 	}
 
 	unsuback := packets.NewControlPacket(packets.Unsuback).(*packets.UnsubackPacket)
@@ -472,19 +347,6 @@ func (c *client) ProcessUnSubscribe(packet *packets.UnsubscribePacket) {
 	}
 }
 
-func (c *client) unsubscribe(sub *subscription) {
-
-	if c.typ == CLIENT {
-		delete(c.subs, sub.topic)
-
-	}
-	b := c.broker
-	if b != nil && sub != nil {
-		b.sl.Remove(sub)
-	}
-
-}
-
 func (c *client) ProcessPing() {
 	if c.status == Disconnected {
 		return
@@ -498,9 +360,7 @@ func (c *client) ProcessPing() {
 }
 
 func (c *client) Close() {
-	c.smu.Lock()
 	if c.status == Disconnected {
-		c.smu.Unlock()
 		return
 	}
 
@@ -516,18 +376,11 @@ func (c *client) Close() {
 		c.conn = nil
 	}
 
-	c.smu.Unlock()
-
 	b := c.broker
-	subs := c.subs
+	subs := c.subMap
 	if b != nil {
 		b.removeClient(c)
-		for _, sub := range subs {
-			err := b.sl.Remove(sub)
-			if err != nil {
-				log.Error("closed client but remove sublist error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
-			}
-		}
+
 		if c.typ == CLIENT {
 			b.BroadcastUnSubscribe(subs)
 		}
