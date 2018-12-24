@@ -77,8 +77,6 @@ Common Options:
 
 * Supports will messages  
 
-* Queue subscribe
-
 * Websocket Support
 
 * TLS/SSL Support
@@ -94,13 +92,6 @@ Common Options:
  2, config router in hmq.config  ("router": "127.0.0.1:9888")
  
 ```
-
-### QUEUE SUBSCRIBE
-~~~
-| Prefix        | Examples                        |
-| ------------- |---------------------------------|
-| $queue/       | mosquitto_sub -t ‘$queue/topic’ |
-~~~
 
 ### ACL Configure
 #### The ACL rules define:
