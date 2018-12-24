@@ -13,9 +13,9 @@ import (
 
 	"github.com/eclipse/paho.mqtt.golang/packets"
 	"github.com/fhmq/hmq/lib/acl"
+	"github.com/fhmq/hmq/lib/sessions"
+	"github.com/fhmq/hmq/lib/topics"
 	"github.com/fhmq/hmq/pool"
-	"github.com/fhmq/hmq/sessions"
-	"github.com/fhmq/hmq/topics"
 	"github.com/shirou/gopsutil/mem"
 	"go.uber.org/zap"
 	"golang.org/x/net/websocket"
