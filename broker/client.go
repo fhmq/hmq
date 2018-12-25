@@ -87,6 +87,7 @@ func (c *client) init() {
 	c.info.localIP = strings.Split(c.conn.LocalAddr().String(), ":")[0]
 	c.info.remoteIP = strings.Split(c.conn.RemoteAddr().String(), ":")[0]
 	c.ctx, c.cancelFunc = context.WithCancel(context.Background())
+	c.subMap = make(map[string]*subscription)
 
 	c.topicsMgr = c.broker.topicsMgr
 }
@@ -237,7 +238,6 @@ func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) {
 					continue
 				}
 			}
-
 			err := s.client.WriterPacket(packet)
 			if err != nil {
 				log.Error("process message for psub error,  ", zap.Error(err), zap.String("ClientID", c.info.clientID))
@@ -383,7 +383,10 @@ func (c *client) Close() {
 
 		if c.typ == CLIENT {
 			b.BroadcastUnSubscribe(subs)
+			//offline notification
+			b.OnlineOfflineNotification(c.info.clientID, false)
 		}
+
 		if c.info.willMsg != nil {
 			b.PublishMessage(c.info.willMsg)
 		}

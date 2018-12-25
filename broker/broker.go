@@ -4,6 +4,7 @@ package broker
 
 import (
 	"crypto/tls"
+	"fmt"
 	"net"
 	"net/http"
 	"runtime/debug"
@@ -368,6 +369,8 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) {
 			}
 		}
 		b.clients.Store(cid, c)
+
+		b.OnlineOfflineNotification(cid, true)
 	case ROUTER:
 		old, exist = b.routes.Load(cid)
 		if exist {
@@ -637,4 +640,13 @@ func (b *Broker) BroadcastUnSubscribe(subs map[string]*subscription) {
 	if len(unsub.Topics) > 0 {
 		b.BroadcastSubOrUnsubMessage(unsub)
 	}
+}
+
+func (b *Broker) OnlineOfflineNotification(clientID string, online bool) {
+
+	packet := packets.NewControlPacket(packets.Publish).(*packets.PublishPacket)
+	packet.Qos = 0
+	packet.Payload = []byte(fmt.Sprintf(`{"clientID":"%s","online":"%v","timestamp":"%s"}`, clientID, online, time.Now().Format(time.RFC3339)))
+
+	b.PublishMessage(packet)
 }
