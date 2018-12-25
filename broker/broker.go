@@ -617,14 +617,18 @@ func (b *Broker) removeClient(c *client) {
 func (b *Broker) PublishMessage(packet *packets.PublishPacket) {
 	var subs []interface{}
 	var qoss []byte
-	b.topicsMgr.Subscribers([]byte(packet.TopicName), packet.Qos, &subs, &qoss)
+	err := b.topicsMgr.Subscribers([]byte(packet.TopicName), packet.Qos, &subs, &qoss)
+	if err != nil {
+		log.Error("search sub client error,  ", zap.Error(err))
+		return
+	}
 
 	for _, sub := range subs {
 		s, ok := sub.(*subscription)
 		if ok {
 			err := s.client.WriterPacket(packet)
 			if err != nil {
-				log.Error("process message for psub error,  ", zap.Error(err))
+				log.Error("write message error,  ", zap.Error(err))
 			}
 		}
 	}
@@ -643,10 +647,10 @@ func (b *Broker) BroadcastUnSubscribe(subs map[string]*subscription) {
 }
 
 func (b *Broker) OnlineOfflineNotification(clientID string, online bool) {
-
 	packet := packets.NewControlPacket(packets.Publish).(*packets.PublishPacket)
+	packet.TopicName = "$SYS/broker/connection/clients/" + clientID
 	packet.Qos = 0
-	packet.Payload = []byte(fmt.Sprintf(`{"clientID":"%s","online":"%v","timestamp":"%s"}`, clientID, online, time.Now().Format(time.RFC3339)))
+	packet.Payload = []byte(fmt.Sprintf(`{"clientID":"%s","online":%v,"timestamp":"%s"}`, clientID, online, time.Now().UTC().Format(time.RFC3339)))
 
 	b.PublishMessage(packet)
 }

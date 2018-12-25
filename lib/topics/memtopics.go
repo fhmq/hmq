@@ -446,12 +446,12 @@ func nextTopicLevel(topic []byte) ([]byte, []byte, error) {
 
 			s = stateSWC
 
-		case '$':
-			if i == 0 {
-				return nil, nil, fmt.Errorf("memtopics/nextTopicLevel: Cannot publish to $ topics")
-			}
+		// case '$':
+		// 	if i == 0 {
+		// 		return nil, nil, fmt.Errorf("memtopics/nextTopicLevel: Cannot publish to $ topics")
+		// 	}
 
-			s = stateSYS
+		// 	s = stateSYS
 
 		default:
 			if s == stateMWC || s == stateSWC {

@@ -145,6 +145,14 @@ Client -> | Rule1 | --nomatch--> | Rule2 | --nomatch--> | Rule3 | -->
         allow | deny           allow | deny           allow | deny
 ~~~
 
+### Online/Offline Notification
+```bash
+ topic:
+     $SYS/broker/connection/clients/<clientID>
+ payload:
+	{"clientID":"client001","online":true/false,"timestamp":"2018-10-25T09:32:32Z"}
+```
+
 ## Performance
 
 * High throughput
