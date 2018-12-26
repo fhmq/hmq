@@ -201,7 +201,7 @@ func (this *snode) sremove(topic []byte, sub interface{}) error {
 			}
 		}
 
-		return fmt.Errorf("memtopics/remove: No topic found for subscriber")
+		return fmt.Errorf("No topic found for subscriber")
 	}
 
 	// Not the last level, so let's find the next level snode, and recursively
@@ -218,7 +218,7 @@ func (this *snode) sremove(topic []byte, sub interface{}) error {
 	// Find the snode that matches the topic level
 	n, ok := this.snodes[level]
 	if !ok {
-		return fmt.Errorf("memtopics/remove: No topic found")
+		return fmt.Errorf("No topic found")
 	}
 
 	// Remove the subscriber from the next level snode
@@ -338,7 +338,7 @@ func (this *rnode) rremove(topic []byte) error {
 	// Find the rnode that matches the topic level
 	n, ok := this.rnodes[level]
 	if !ok {
-		return fmt.Errorf("memtopics/rremove: No topic found")
+		return fmt.Errorf("No topic found")
 	}
 
 	// Remove the subscriber from the next level rnode
@@ -423,7 +423,7 @@ func nextTopicLevel(topic []byte) ([]byte, []byte, error) {
 		switch c {
 		case '/':
 			if s == stateMWC {
-				return nil, nil, fmt.Errorf("memtopics/nextTopicLevel: Multi-level wildcard found in topic and it's not at the last level")
+				return nil, nil, fmt.Errorf("Multi-level wildcard found in topic and it's not at the last level")
 			}
 
 			if i == 0 {
@@ -434,28 +434,28 @@ func nextTopicLevel(topic []byte) ([]byte, []byte, error) {
 
 		case '#':
 			if i != 0 {
-				return nil, nil, fmt.Errorf("memtopics/nextTopicLevel: Wildcard character '#' must occupy entire topic level")
+				return nil, nil, fmt.Errorf("Wildcard character '#' must occupy entire topic level")
 			}
 
 			s = stateMWC
 
 		case '+':
 			if i != 0 {
-				return nil, nil, fmt.Errorf("memtopics/nextTopicLevel: Wildcard character '+' must occupy entire topic level")
+				return nil, nil, fmt.Errorf("Wildcard character '+' must occupy entire topic level")
 			}
 
 			s = stateSWC
 
 		// case '$':
 		// 	if i == 0 {
-		// 		return nil, nil, fmt.Errorf("memtopics/nextTopicLevel: Cannot publish to $ topics")
+		// 		return nil, nil, fmt.Errorf("Cannot publish to $ topics")
 		// 	}
 
 		// 	s = stateSYS
 
 		default:
 			if s == stateMWC || s == stateSWC {
-				return nil, nil, fmt.Errorf("memtopics/nextTopicLevel: Wildcard characters '#' and '+' must occupy entire topic level")
+				return nil, nil, fmt.Errorf("Wildcard characters '#' and '+' must occupy entire topic level")
 			}
 
 			s = stateCHR
