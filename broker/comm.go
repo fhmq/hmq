@@ -7,10 +7,8 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
-	"errors"
 	"io"
 	"reflect"
-	"strings"
 	"time"
 )
 
@@ -47,47 +45,6 @@ const (
 	QosExactlyOnce
 	QosFailure = 0x80
 )
-
-func SubscribeTopicCheckAndSpilt(topic string) ([]string, error) {
-	if strings.Index(topic, "#") != -1 && strings.Index(topic, "#") != len(topic)-1 {
-		return nil, errors.New("Topic format error with index of #")
-	}
-	re := strings.Split(topic, "/")
-	for i, v := range re {
-		if i != 0 && i != (len(re)-1) {
-			if v == "" {
-				return nil, errors.New("Topic format error with index of //")
-			}
-			if strings.Contains(v, "+") && v != "+" {
-				return nil, errors.New("Topic format error with index of +")
-			}
-		} else {
-			if v == "" {
-				re[i] = "/"
-			}
-		}
-	}
-	return re, nil
-
-}
-
-func PublishTopicCheckAndSpilt(topic string) ([]string, error) {
-	if strings.Index(topic, "#") != -1 || strings.Index(topic, "+") != -1 {
-		return nil, errors.New("Publish Topic format error with + and #")
-	}
-	re := strings.Split(topic, "/")
-	for i, v := range re {
-		if v == "" {
-			if i != 0 && i != (len(re)-1) {
-				return nil, errors.New("Topic format error with index of //")
-			} else {
-				re[i] = "/"
-			}
-		}
-
-	}
-	return re, nil
-}
 
 func equal(k1, k2 interface{}) bool {
 	if reflect.TypeOf(k1) != reflect.TypeOf(k2) {

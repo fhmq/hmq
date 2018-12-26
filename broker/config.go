@@ -9,10 +9,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/fhmq/hmq/logger"
-	"go.uber.org/zap"
 	"io/ioutil"
 	"os"
+
+	"github.com/fhmq/hmq/logger"
+	"go.uber.org/zap"
 )
 
 type Config struct {

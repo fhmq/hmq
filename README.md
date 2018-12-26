@@ -77,8 +77,6 @@ Common Options:
 
 * Supports will messages  
 
-* Queue subscribe
-
 * Websocket Support
 
 * TLS/SSL Support
@@ -94,13 +92,6 @@ Common Options:
  2, config router in hmq.config  ("router": "127.0.0.1:9888")
  
 ```
-
-### QUEUE SUBSCRIBE
-~~~
-| Prefix        | Examples                        |
-| ------------- |---------------------------------|
-| $queue/       | mosquitto_sub -t ‘$queue/topic’ |
-~~~
 
 ### ACL Configure
 #### The ACL rules define:
@@ -154,6 +145,14 @@ Client -> | Rule1 | --nomatch--> | Rule2 | --nomatch--> | Rule3 | -->
         allow | deny           allow | deny           allow | deny
 ~~~
 
+### Online/Offline Notification
+```bash
+ topic:
+     $SYS/broker/connection/clients/<clientID>
+ payload:
+	{"clientID":"client001","online":true/false,"timestamp":"2018-10-25T09:32:32Z"}
+```
+
 ## Performance
 
 * High throughput
@@ -166,3 +165,8 @@ Client -> | Rule1 | --nomatch--> | Rule2 | --nomatch--> | Rule3 | -->
 ## License
 
 * Apache License Version 2.0
+
+
+## Reference
+
+* Surgermq.(https://github.com/surgemq/surgemq)

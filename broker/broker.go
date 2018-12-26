@@ -4,6 +4,7 @@ package broker
 
 import (
 	"crypto/tls"
+	"fmt"
 	"net"
 	"net/http"
 	"runtime/debug"
@@ -13,6 +14,8 @@ import (
 
 	"github.com/eclipse/paho.mqtt.golang/packets"
 	"github.com/fhmq/hmq/lib/acl"
+	"github.com/fhmq/hmq/lib/sessions"
+	"github.com/fhmq/hmq/lib/topics"
 	"github.com/fhmq/hmq/pool"
 	"github.com/shirou/gopsutil/mem"
 	"go.uber.org/zap"
@@ -42,9 +45,9 @@ type Broker struct {
 	remotes     sync.Map
 	nodes       map[string]interface{}
 	clusterPool chan *Message
-	sl          *Sublist
-	rl          *RetainList
 	queues      map[string]int
+	topicsMgr   *topics.Manager
+	sessionMgr  *sessions.Manager
 	// messagePool []chan *Message
 }
 
@@ -62,13 +65,24 @@ func NewBroker(config *Config) (*Broker, error) {
 		id:          GenUniqueId(),
 		config:      config,
 		wpool:       pool.New(config.Worker),
-		sl:          NewSublist(),
-		rl:          NewRetainList(),
 		nodes:       make(map[string]interface{}),
 		queues:      make(map[string]int),
 		clusterPool: make(chan *Message),
-		// messagePool: newMessagePool(),
 	}
+
+	var err error
+	b.topicsMgr, err = topics.NewManager("mem")
+	if err != nil {
+		log.Error("new topic manager error", zap.Error(err))
+		return nil, err
+	}
+
+	b.sessionMgr, err = sessions.NewManager("mem")
+	if err != nil {
+		log.Error("new session manager error", zap.Error(err))
+		return nil, err
+	}
+
 	if b.config.TlsPort != "" {
 		tlsconfig, err := NewTLSConfig(b.config.TlsInfo)
 		if err != nil {
@@ -333,6 +347,12 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) {
 
 	c.init()
 
+	err = b.getSession(c, msg, connack)
+	if err != nil {
+		log.Error("get session error: ", zap.String("clientID", c.info.clientID))
+		return
+	}
+
 	cid := c.info.clientID
 
 	var exist bool
@@ -349,6 +369,8 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) {
 			}
 		}
 		b.clients.Store(cid, c)
+
+		b.OnlineOfflineNotification(cid, true)
 	case ROUTER:
 		old, exist = b.routes.Load(cid)
 		if exist {
@@ -535,9 +557,9 @@ func (b *Broker) SendLocalSubsToRouter(c *client) {
 	b.clients.Range(func(key, value interface{}) bool {
 		client, ok := value.(*client)
 		if ok {
-			subs := client.subs
+			subs := client.subMap
 			for _, sub := range subs {
-				subInfo.Topics = append(subInfo.Topics, string(sub.topic))
+				subInfo.Topics = append(subInfo.Topics, sub.topic)
 				subInfo.Qoss = append(subInfo.Qoss, sub.qos)
 			}
 		}
@@ -593,17 +615,20 @@ func (b *Broker) removeClient(c *client) {
 }
 
 func (b *Broker) PublishMessage(packet *packets.PublishPacket) {
-	topic := packet.TopicName
-	r := b.sl.Match(topic)
-	if len(r.psubs) == 0 {
+	var subs []interface{}
+	var qoss []byte
+	err := b.topicsMgr.Subscribers([]byte(packet.TopicName), packet.Qos, &subs, &qoss)
+	if err != nil {
+		log.Error("search sub client error,  ", zap.Error(err))
 		return
 	}
 
-	for _, sub := range r.psubs {
-		if sub != nil {
-			err := sub.client.WriterPacket(packet)
+	for _, sub := range subs {
+		s, ok := sub.(*subscription)
+		if ok {
+			err := s.client.WriterPacket(packet)
 			if err != nil {
-				log.Error("process message for psub error,  ", zap.Error(err))
+				log.Error("write message error,  ", zap.Error(err))
 			}
 		}
 	}
@@ -619,4 +644,13 @@ func (b *Broker) BroadcastUnSubscribe(subs map[string]*subscription) {
 	if len(unsub.Topics) > 0 {
 		b.BroadcastSubOrUnsubMessage(unsub)
 	}
+}
+
+func (b *Broker) OnlineOfflineNotification(clientID string, online bool) {
+	packet := packets.NewControlPacket(packets.Publish).(*packets.PublishPacket)
+	packet.TopicName = "$SYS/broker/connection/clients/" + clientID
+	packet.Qos = 0
+	packet.Payload = []byte(fmt.Sprintf(`{"clientID":"%s","online":%v,"timestamp":"%s"}`, clientID, online, time.Now().UTC().Format(time.RFC3339)))
+
+	b.PublishMessage(packet)
 }
