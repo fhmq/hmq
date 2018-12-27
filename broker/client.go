@@ -51,11 +51,6 @@ type client struct {
 	rmsgs      []*packets.PublishPacket
 }
 
-type subInfo struct {
-	sub *subscription
-	num int
-}
-
 type subscription struct {
 	client *client
 	topic  string
