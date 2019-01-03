@@ -213,7 +213,9 @@ func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) {
 		}
 	}
 
+	c.mu.Lock()
 	err := c.topicsMgr.Subscribers([]byte(packet.TopicName), packet.Qos, &c.subs, &c.qoss)
+	c.mu.Unlock()
 	if err != nil {
 		log.Error("Error retrieving subscribers list: ", zap.String("ClientID", c.info.clientID))
 		return
