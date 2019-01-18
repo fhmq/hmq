@@ -112,6 +112,14 @@ func (c *client) readLoop() {
 				log.Error("read packet error: ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 				msg := &Message{client: c, packet: DisconnectdPacket}
 				b.SubmitWork(msg)
+
+				// remove subscriptions related to that client
+				for topic, sub := range c.subMap {
+					t := []byte(topic)
+					c.topicsMgr.Unsubscribe(t, sub)
+					c.session.RemoveTopic(topic)
+					delete(c.subMap, topic)
+				}
 				return
 			}
 
