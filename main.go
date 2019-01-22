@@ -7,7 +7,7 @@ copyright notice and this permission notice appear in all copies.
 package main
 
 import (
-	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"runtime"
@@ -19,19 +19,17 @@ func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 	config, err := broker.ConfigureConfig(os.Args[1:])
 	if err != nil {
-		fmt.Println("configure broker config error: ", err)
-		return
+		log.Fatal("configure broker config error: ", err)
 	}
 
 	b, err := broker.NewBroker(config)
 	if err != nil {
-		fmt.Println("New Broker error: ", err)
-		return
+		log.Fatal("New Broker error: ", err)
 	}
 	b.Start()
 
 	s := waitForSignal()
-	fmt.Println("signal received, broker closed.", s)
+	log.Println("signal received, broker closed.", s)
 }
 
 func waitForSignal() os.Signal {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	_ "net/http/pprof"
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
@@ -153,6 +154,16 @@ func (b *Broker) Start() {
 	//system monitor
 	go StateMonitor()
 
+	if b.config.Debug {
+		startPProf()
+	}
+
+}
+
+func startPProf() {
+	go func() {
+		http.ListenAndServe(":10060", nil)
+	}()
 }
 
 func StateMonitor() {
