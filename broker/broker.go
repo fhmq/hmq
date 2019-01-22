@@ -628,7 +628,9 @@ func (b *Broker) removeClient(c *client) {
 func (b *Broker) PublishMessage(packet *packets.PublishPacket) {
 	var subs []interface{}
 	var qoss []byte
+	b.mu.Lock()
 	err := b.topicsMgr.Subscribers([]byte(packet.TopicName), packet.Qos, &subs, &qoss)
+	b.mu.Unlock()
 	if err != nil {
 		log.Error("search sub client error,  ", zap.Error(err))
 		return
