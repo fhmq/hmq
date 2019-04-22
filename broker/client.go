@@ -197,9 +197,6 @@ func (c *client) ProcessPublish(packet *packets.PublishPacket) {
 }
 
 func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) {
-	if c.status == Disconnected {
-		return
-	}
 
 	b := c.broker
 	if b == nil {
