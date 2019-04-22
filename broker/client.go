@@ -111,7 +111,7 @@ func (c *client) readLoop() {
 			if err != nil {
 				log.Error("read packet error: ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 				msg := &Message{client: c, packet: DisconnectdPacket}
-				b.SubmitWork(msg)
+				b.SubmitWork(c.info.clientID, msg)
 				return
 			}
 
@@ -119,7 +119,7 @@ func (c *client) readLoop() {
 				client: c,
 				packet: packet,
 			}
-			b.SubmitWork(msg)
+			b.SubmitWork(c.info.clientID, msg)
 		}
 	}
 
@@ -361,7 +361,7 @@ func (c *client) Close() {
 
 	c.status = Disconnected
 	//wait for message complete
-	time.Sleep(1 * time.Second)
+	// time.Sleep(1 * time.Second)
 	// c.status = Disconnected
 
 	if c.conn != nil {
