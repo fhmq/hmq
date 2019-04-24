@@ -104,7 +104,7 @@ func NewBroker(config *Config) (*Broker, error) {
 	return b, nil
 }
 
-func (b *Broker) SubmitWork(msg *Message) {
+func (b *Broker) SubmitWork(clientId string, msg *Message) {
 	if b.wpool == nil {
 		b.wpool = pool.New(b.config.Worker)
 	}
@@ -112,7 +112,7 @@ func (b *Broker) SubmitWork(msg *Message) {
 	if msg.client.typ == CLUSTER {
 		b.clusterPool <- msg
 	} else {
-		b.wpool.Submit(func() {
+		b.wpool.Submit(clientId, func() {
 			ProcessMessage(msg)
 		})
 	}
@@ -322,6 +322,9 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) {
 		log.Error("received msg that was not Connect")
 		return
 	}
+
+	log.Info("reconnect connect from ", zap.String("clientID", msg.ClientIdentifier))
+
 	connack := packets.NewControlPacket(packets.Connack).(*packets.ConnackPacket)
 	connack.ReturnCode = packets.Accepted
 	connack.SessionPresent = msg.CleanSession
