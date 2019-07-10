@@ -19,4 +19,5 @@ require (
 	golang.org/x/net v0.0.0-20190424024845-afe8014c977f
 	golang.org/x/sys v0.0.0-20190422165155-953cdadca894 // indirect
 	golang.org/x/tools v0.0.0-20190424031103-cb2dda6eabdf // indirect
+	github.com/Shopify/sarama v1.23.0
 )

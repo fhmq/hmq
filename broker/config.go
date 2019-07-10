@@ -31,6 +31,7 @@ type Config struct {
 	Acl     bool      `json:"acl"`
 	AclConf string    `json:"aclConf"`
 	Debug   bool      `json:"-"`
+	Plugins []string  `json:"plugins"`
 }
 
 type RouteInfo struct {

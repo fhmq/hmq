@@ -11,6 +11,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fhmq/hmq/plugins"
+	"github.com/fhmq/hmq/plugins/kafka"
+
 	"github.com/eclipse/paho.mqtt.golang/packets"
 	"github.com/fhmq/hmq/lib/sessions"
 	"github.com/fhmq/hmq/lib/topics"
@@ -176,6 +179,17 @@ func (c *client) ProcessPublish(packet *packets.PublishPacket) {
 		return
 	}
 
+	if c.broker.pluginKafka && c.typ == CLIENT {
+		kafka.Publish(&plugins.Elements{
+			ClientID:  c.info.clientID,
+			Username:  c.info.username,
+			Action:    plugins.Publish,
+			Timestamp: time.Now().Unix(),
+			Payload:   string(packet.Payload),
+			Topic:     topic,
+		})
+	}
+
 	switch packet.Qos {
 	case QosAtMostOnce:
 		c.ProcessPublishMessage(packet)
@@ -266,6 +280,16 @@ func (c *client) ProcessSubscribe(packet *packets.SubscribePacket) {
 			continue
 		}
 
+		if c.broker.pluginKafka && c.typ == CLIENT {
+			kafka.Publish(&plugins.Elements{
+				ClientID:  c.info.clientID,
+				Username:  c.info.username,
+				Action:    plugins.Subscribe,
+				Timestamp: time.Now().Unix(),
+				Topic:     topic,
+			})
+		}
+
 		sub := &subscription{
 			topic:  t,
 			qos:    qoss[i],
@@ -324,6 +348,16 @@ func (c *client) ProcessUnSubscribe(packet *packets.UnsubscribePacket) {
 			c.session.RemoveTopic(topic)
 			delete(c.subMap, topic)
 		}
+
+		if c.broker.pluginKafka && c.typ == CLIENT {
+			kafka.Publish(&plugins.Elements{
+				ClientID:  c.info.clientID,
+				Username:  c.info.username,
+				Action:    plugins.Unsubscribe,
+				Timestamp: time.Now().Unix(),
+				Topic:     topic,
+			})
+		}
 	}
 
 	unsuback := packets.NewControlPacket(packets.Unsuback).(*packets.UnsubackPacket)
@@ -363,6 +397,15 @@ func (c *client) Close() {
 	//wait for message complete
 	// time.Sleep(1 * time.Second)
 	// c.status = Disconnected
+
+	if c.broker.pluginKafka && c.typ == CLIENT {
+		kafka.Publish(&plugins.Elements{
+			ClientID:  c.info.clientID,
+			Username:  c.info.username,
+			Action:    plugins.Disconnect,
+			Timestamp: time.Now().Unix(),
+		})
+	}
 
 	if c.conn != nil {
 		c.conn.Close()

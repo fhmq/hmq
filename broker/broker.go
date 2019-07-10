@@ -13,10 +13,13 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/fhmq/hmq/plugins"
+
 	"github.com/eclipse/paho.mqtt.golang/packets"
-	"github.com/fhmq/hmq/lib/acl"
 	"github.com/fhmq/hmq/lib/sessions"
 	"github.com/fhmq/hmq/lib/topics"
+	"github.com/fhmq/hmq/plugins/authhttp"
+	"github.com/fhmq/hmq/plugins/kafka"
 	"github.com/fhmq/hmq/pool"
 	"github.com/shirou/gopsutil/mem"
 	"go.uber.org/zap"
@@ -34,21 +37,23 @@ type Message struct {
 }
 
 type Broker struct {
-	id          string
-	cid         uint64
-	mu          sync.Mutex
-	config      *Config
-	tlsConfig   *tls.Config
-	AclConfig   *acl.ACLConfig
-	wpool       *pool.WorkerPool
-	clients     sync.Map
-	routes      sync.Map
-	remotes     sync.Map
-	nodes       map[string]interface{}
-	clusterPool chan *Message
-	queues      map[string]int
-	topicsMgr   *topics.Manager
-	sessionMgr  *sessions.Manager
+	id             string
+	cid            uint64
+	mu             sync.Mutex
+	config         *Config
+	tlsConfig      *tls.Config
+	wpool          *pool.WorkerPool
+	clients        sync.Map
+	routes         sync.Map
+	remotes        sync.Map
+	nodes          map[string]interface{}
+	clusterPool    chan *Message
+	queues         map[string]int
+	topicsMgr      *topics.Manager
+	sessionMgr     *sessions.Manager
+	pluginAuthHTTP bool
+	pluginKafka    bool
+
 	// messagePool []chan *Message
 }
 
@@ -92,15 +97,18 @@ func NewBroker(config *Config) (*Broker, error) {
 		}
 		b.tlsConfig = tlsconfig
 	}
-	if b.config.Acl {
-		aclconfig, err := acl.AclConfigLoad(b.config.AclConf)
-		if err != nil {
-			log.Error("Load acl conf error", zap.Error(err))
-			return nil, err
+
+	for _, plugin := range b.config.Plugins {
+		switch plugin {
+		case authhttp.AuthHTTP:
+			authhttp.Init()
+			b.pluginAuthHTTP = true
+		case kafka.Kafka:
+			kafka.Init()
+			b.pluginKafka = true
 		}
-		b.AclConfig = aclconfig
-		b.StartAclWatcher()
 	}
+
 	return b, nil
 }
 
@@ -328,10 +336,28 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) {
 	connack := packets.NewControlPacket(packets.Connack).(*packets.ConnackPacket)
 	connack.ReturnCode = packets.Accepted
 	connack.SessionPresent = msg.CleanSession
+
+	if b.pluginAuthHTTP == true && authhttp.CheckAuth(string(msg.ClientIdentifier), string(msg.Username), string(msg.Password)) {
+		err = connack.Write(conn)
+		if err != nil {
+			log.Error("send connack error, ", zap.Error(err), zap.String("clientID", msg.ClientIdentifier))
+			return
+		}
+	}
+
 	err = connack.Write(conn)
 	if err != nil {
 		log.Error("send connack error, ", zap.Error(err), zap.String("clientID", msg.ClientIdentifier))
 		return
+	}
+
+	if b.pluginKafka && typ == CLIENT {
+		kafka.Publish(&plugins.Elements{
+			ClientID:  string(msg.ClientIdentifier),
+			Username:  string(msg.Username),
+			Action:    plugins.Connect,
+			Timestamp: time.Now().Unix(),
+		})
 	}
 
 	willmsg := packets.NewControlPacket(packets.Publish).(*packets.PublishPacket)

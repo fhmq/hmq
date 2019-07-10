@@ -1,0 +1,8 @@
+{
+    "go.lintFlags": [
+        "--disable=all",
+        "--enable=errcheck,varcheck,deadcode",
+        "--enable=varcheck",
+        "--enable=deadcode"
+    ]
+}
