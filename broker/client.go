@@ -5,6 +5,7 @@ package broker
 import (
 	"context"
 	"errors"
+	"math/rand"
 	"net"
 	"reflect"
 	"strings"
@@ -78,6 +79,7 @@ type route struct {
 
 var (
 	DisconnectdPacket = packets.NewControlPacket(packets.Disconnect).(*packets.DisconnectPacket)
+	r                 = rand.New(rand.NewSource(time.Now().UnixNano()))
 )
 
 func (c *client) init() {
@@ -237,7 +239,8 @@ func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) {
 		return
 	}
 
-	for _, sub := range c.subs {
+	var qsub []int
+	for i, sub := range c.subs {
 		s, ok := sub.(*subscription)
 		if ok {
 			if s.client.typ == ROUTER {
@@ -245,12 +248,26 @@ func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) {
 					continue
 				}
 			}
-			err := s.client.WriterPacket(packet)
-			if err != nil {
-				log.Error("process message for psub error,  ", zap.Error(err), zap.String("ClientID", c.info.clientID))
+			if s.queue {
+				qsub = append(qsub, i)
+			} else {
+				err := s.client.WriterPacket(packet)
+				if err != nil {
+					log.Error("process message for psub error,  ", zap.Error(err), zap.String("ClientID", c.info.clientID))
+				}
 			}
+
 		}
 
+	}
+
+	if len(qsub) > 0 {
+		idx := r.Intn(len(qsub))
+		sub := c.subs[qsub[idx]].(*subscription)
+		err := sub.client.WriterPacket(packet)
+		if err != nil {
+			log.Error("process message for qsub error,  ", zap.Error(err), zap.String("ClientID", c.info.clientID))
+		}
 	}
 
 }
@@ -290,10 +307,19 @@ func (c *client) ProcessSubscribe(packet *packets.SubscribePacket) {
 			})
 		}
 
+		queue := strings.HasPrefix(topic, "$queue/")
+		if queue {
+			// topic = strings.TrimPrefix(topic, "$queue/")
+			if _, exists := b.queues[topic]; !exists {
+				b.queues[topic] = 0
+			}
+		}
+
 		sub := &subscription{
 			topic:  t,
 			qos:    qoss[i],
 			client: c,
+			queue:  queue,
 		}
 
 		rqos, err := c.topicsMgr.Subscribe([]byte(topic), qoss[i], sub)

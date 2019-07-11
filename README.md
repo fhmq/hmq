@@ -61,7 +61,8 @@ Common Options:
 		"keyFile": "tls/server/key.pem"
 	},
 	"acl":true,
-	"aclConf":"conf/acl.conf"
+	"aclConf":"conf/acl.conf",
+	"plugins": ["authhttp","kafka"]
 }
 ~~~
 
@@ -82,6 +83,17 @@ Common Options:
 * TLS/SSL Support
 
 * Flexible  ACL
+
+* AuthHTTP Support
+
+* Kafka Bridge Support
+
+### QUEUE SUBSCRIBE
+~~~
+| Prefix        | Examples                        |
+| ------------- |---------------------------------|
+| $queue/       | mosquitto_sub -t ‘$queue/topic’ |
+~~~
 
 ### Cluster
 ```bash
