@@ -46,5 +46,9 @@ func InitLogger(debug bool) {
 
 // Get return a *zap.Logger instance
 func Get() *zap.Logger {
+	if instance == nil {
+		l, _ := NewProdLogger()
+		return l
+	}
 	return instance
 }
