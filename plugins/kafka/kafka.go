@@ -46,7 +46,7 @@ func Init() {
 	if err != nil {
 		log.Fatal("Unmarshal config file error: ", zap.Error(err))
 	}
-
+	connect()
 }
 
 //connect
