@@ -18,15 +18,26 @@ spec:
           ports:
             - containerPort: 1883
           volumeMounts:
-            - name: mqtt-broker
+            - name: mqtt-broker1
               mountPath: /conf
+              subPath: hmq.config
+            - name: mqtt-broker1
+              mountPath: /plugins/kafka/kafka.json
+              subPath: kafka.json
+            - name: mqtt-broker1
+              mountPath: /plugins/authttp/http.json
+              subPath: kafka.json     
       volumes:
-        - name: mqtt-broker
+        - name: mqtt-broker1
           configMap:
-            name: mqtt-broker
+            name: mqtt-broker1
             items:
               - key: hmq.config
                 path: hmq.config
-      imagePullSecrets:
-        - name: uiot-core-reg-secret
+            items:
+              - key: http.json
+                path: http.json
+            items:
+              - key: kafka.json
+                path: kafka.json
 

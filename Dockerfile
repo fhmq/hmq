@@ -1,4 +1,4 @@
-FROM golang:1.12
+FROM golang:1.12 as builder
 WORKDIR /go/src/github.com/fhmq/hmq
 COPY . .
 COPY ./vendor .

@@ -23,7 +23,7 @@ data:
         "onUnsubscribe": "onUnsubscribe"
     }
   
-    auththhp.json: |
+    authhttp.json: |
       {
           "auth": "http://127.0.0.1:9090/mqtt/auth",
           "acl": "http://127.0.0.1:9090/mqtt/acl",
