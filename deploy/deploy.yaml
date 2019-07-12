@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mqtt-broker
+spec:
+  selector:
+    matchLabels:
+      app: mqtt-broker
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: mqtt-broker
+    spec:
+      containers:
+        - name: mqtt-broker
+          image: uhub.service.ucloud.cn/uiot_core_hub/hmq:v0.1.0
+          ports:
+            - containerPort: 1883
+          volumeMounts:
+            - name: mqtt-broker
+              mountPath: /conf
+      volumes:
+        - name: mqtt-broker
+          configMap:
+            name: mqtt-broker
+            items:
+              - key: hmq.config
+                path: hmq.config
+      imagePullSecrets:
+        - name: uiot-core-reg-secret
+
