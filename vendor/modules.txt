@@ -33,6 +33,8 @@ github.com/pierrec/lz4/internal/xxh32
 github.com/pmezard/go-difflib/difflib
 # github.com/rcrowley/go-metrics v0.0.0-20181016184325-3113b8401b8a
 github.com/rcrowley/go-metrics
+# github.com/satori/go.uuid v1.2.0
+github.com/satori/go.uuid
 # github.com/segmentio/fasthash v0.0.0-20180216231524-a72b379d632e
 github.com/segmentio/fasthash/fnv1a
 # github.com/shirou/gopsutil v2.18.12+incompatible
@@ -40,6 +42,33 @@ github.com/shirou/gopsutil/mem
 github.com/shirou/gopsutil/internal/common
 # github.com/stretchr/testify v1.3.0
 github.com/stretchr/testify/assert
+# github.com/tidwall/gjson v1.3.0
+github.com/tidwall/gjson
+# github.com/tidwall/match v1.0.1
+github.com/tidwall/match
+# github.com/tidwall/pretty v1.0.0
+github.com/tidwall/pretty
+# go.uber.org/atomic v1.3.2
+go.uber.org/atomic
+# go.uber.org/multierr v1.1.0
+go.uber.org/multierr
+# go.uber.org/zap v1.9.1
+go.uber.org/zap
+go.uber.org/zap/internal/bufferpool
+go.uber.org/zap/zapcore
+go.uber.org/zap/buffer
+go.uber.org/zap/internal/color
+go.uber.org/zap/internal/exit
+# golang.org/x/crypto v0.0.0-20190422183909-d864b10871cd
+golang.org/x/crypto/md4
+golang.org/x/crypto/pbkdf2
+# golang.org/x/net v0.0.0-20190424024845-afe8014c977f
+golang.org/x/net/websocket
+golang.org/x/net/proxy
+golang.org/x/net/internal/socks
+# golang.org/x/sys v0.0.0-20190422165155-953cdadca894
+golang.org/x/sys/unix
+golang.org/x/sys/windows
 # gopkg.in/jcmturner/aescts.v1 v1.0.1
 gopkg.in/jcmturner/aescts.v1
 # gopkg.in/jcmturner/dnsutils.v1 v1.0.1

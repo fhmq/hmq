@@ -251,10 +251,7 @@ func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) {
 			if s.queue {
 				qsub = append(qsub, i)
 			} else {
-				err := s.client.WriterPacket(packet)
-				if err != nil {
-					log.Error("process message for psub error,  ", zap.Error(err), zap.String("ClientID", c.info.clientID))
-				}
+				publish(s, packet)
 			}
 
 		}
@@ -264,12 +261,22 @@ func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) {
 	if len(qsub) > 0 {
 		idx := r.Intn(len(qsub))
 		sub := c.subs[qsub[idx]].(*subscription)
-		err := sub.client.WriterPacket(packet)
-		if err != nil {
-			log.Error("process message for qsub error,  ", zap.Error(err), zap.String("ClientID", c.info.clientID))
-		}
+		publish(sub, packet)
 	}
 
+}
+
+func publish(sub *subscription, packet *packets.PublishPacket) {
+	var p *packets.PublishPacket
+	if sub.client.info.username != "root" {
+		p = unWrapPublishPacket(p)
+	} else {
+		p = wrapPublishPacket(p)
+	}
+	err := sub.client.WriterPacket(p)
+	if err != nil {
+		log.Error("process message for psub error,  ", zap.Error(err))
+	}
 }
 
 func (c *client) ProcessSubscribe(packet *packets.SubscribePacket) {

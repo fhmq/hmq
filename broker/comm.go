@@ -3,13 +3,14 @@
 package broker
 
 import (
-	"crypto/md5"
-	"crypto/rand"
-	"encoding/base64"
-	"encoding/hex"
-	"io"
+	"encoding/json"
 	"reflect"
 	"time"
+
+	"github.com/tidwall/gjson"
+
+	"github.com/eclipse/paho.mqtt.golang/packets"
+	uuid "github.com/satori/go.uuid"
 )
 
 const (
@@ -92,12 +93,24 @@ func equal(k1, k2 interface{}) bool {
 }
 
 func GenUniqueId() string {
-	b := make([]byte, 48)
-	if _, err := io.ReadFull(rand.Reader, b); err != nil {
-		return ""
+	return uuid.NewV4().String()
+}
+
+func wrapPublishPacket(packet *packets.PublishPacket) *packets.PublishPacket {
+	p := packet.Copy()
+	wrapPayload := map[string]interface{}{
+		"message_id": GenUniqueId(),
+		"payload":    string(p.Payload),
 	}
-	h := md5.New()
-	h.Write([]byte(base64.URLEncoding.EncodeToString(b)))
-	return hex.EncodeToString(h.Sum(nil))
-	// return GetMd5String()
+	b, _ := json.Marshal(wrapPayload)
+	p.Payload = b
+	return p
+}
+
+func unWrapPublishPacket(packet *packets.PublishPacket) *packets.PublishPacket {
+	p := packet.Copy()
+	if gjson.GetBytes(p.Payload, "paload").Exists() {
+		p.Payload = []byte(gjson.GetBytes(p.Payload, "payload").String())
+	}
+	return p
 }
