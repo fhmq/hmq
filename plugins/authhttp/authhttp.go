@@ -27,8 +27,8 @@ var (
 //Config device kafka config
 type Config struct {
 	AuthURL  string `json:"auth"`
-	ACLURL   string `json:"onSubscribe"`
-	SuperURL string `json:"onPublish"`
+	ACLURL   string `json:"acl"`
+	SuperURL string `json:"super"`
 }
 
 //Init init kafak client
