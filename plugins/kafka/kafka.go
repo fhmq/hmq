@@ -3,6 +3,7 @@ package kafka
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"regexp"
 	"time"
@@ -93,9 +94,12 @@ func Publish(e *plugins.Elements) {
 	if err != nil {
 		log.Error("publish kafka error: ", zap.Error(err))
 	}
+	fmt.Println("------", e.Topic)
 
 	match, _ := regexp.MatchString(_ThingModelTopicRegexp, e.Topic)
 	if match && e.Action == plugins.Publish {
+
+		fmt.Println("------ match", e.Topic)
 		topic := "tmodel.msg.upstream"
 		err := publish(topic, key, e)
 		if err != nil {
