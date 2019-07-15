@@ -33,7 +33,7 @@ type Config struct {
 
 //Init init kafak client
 func Init() {
-	content, err := ioutil.ReadFile("/plugins/authhttp/http.json")
+	content, err := ioutil.ReadFile("./plugins/authhttp/http.json")
 	if err != nil {
 		log.Fatal("Read config file error: ", zap.Error(err))
 	}
