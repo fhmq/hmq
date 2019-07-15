@@ -16,9 +16,18 @@ github.com/eapache/go-xerial-snappy
 github.com/eapache/queue
 # github.com/eclipse/paho.mqtt.golang v1.2.0
 github.com/eclipse/paho.mqtt.golang/packets
+# github.com/gin-contrib/sse v0.0.0-20190301062529-5545eab6dad3
+github.com/gin-contrib/sse
+# github.com/gin-gonic/gin v1.4.0
+github.com/gin-gonic/gin
+github.com/gin-gonic/gin/binding
+github.com/gin-gonic/gin/internal/json
+github.com/gin-gonic/gin/render
 # github.com/go-ole/go-ole v1.2.4
 github.com/go-ole/go-ole
 github.com/go-ole/go-ole/oleutil
+# github.com/golang/protobuf v1.3.1
+github.com/golang/protobuf/proto
 # github.com/golang/snappy v0.0.1
 github.com/golang/snappy
 # github.com/hashicorp/go-uuid v1.0.1
@@ -26,6 +35,14 @@ github.com/hashicorp/go-uuid
 # github.com/jcmturner/gofork v0.0.0-20190328161633-dc7c13fece03
 github.com/jcmturner/gofork/encoding/asn1
 github.com/jcmturner/gofork/x/crypto/pbkdf2
+# github.com/json-iterator/go v1.1.6
+github.com/json-iterator/go
+# github.com/mattn/go-isatty v0.0.7
+github.com/mattn/go-isatty
+# github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd
+github.com/modern-go/concurrent
+# github.com/modern-go/reflect2 v1.0.1
+github.com/modern-go/reflect2
 # github.com/pierrec/lz4 v0.0.0-20190327172049-315a67e90e41
 github.com/pierrec/lz4
 github.com/pierrec/lz4/internal/xxh32
@@ -48,6 +65,8 @@ github.com/tidwall/gjson
 github.com/tidwall/match
 # github.com/tidwall/pretty v1.0.0
 github.com/tidwall/pretty
+# github.com/ugorji/go v1.1.4
+github.com/ugorji/go/codec
 # go.uber.org/atomic v1.3.2
 go.uber.org/atomic
 # go.uber.org/multierr v1.1.0
@@ -62,13 +81,15 @@ go.uber.org/zap/internal/exit
 # golang.org/x/crypto v0.0.0-20190422183909-d864b10871cd
 golang.org/x/crypto/md4
 golang.org/x/crypto/pbkdf2
-# golang.org/x/net v0.0.0-20190424024845-afe8014c977f
+# golang.org/x/net v0.0.0-20190503192946-f4e77d36d62c
 golang.org/x/net/websocket
 golang.org/x/net/proxy
 golang.org/x/net/internal/socks
 # golang.org/x/sys v0.0.0-20190422165155-953cdadca894
 golang.org/x/sys/unix
 golang.org/x/sys/windows
+# gopkg.in/go-playground/validator.v8 v8.18.2
+gopkg.in/go-playground/validator.v8
 # gopkg.in/jcmturner/aescts.v1 v1.0.1
 gopkg.in/jcmturner/aescts.v1
 # gopkg.in/jcmturner/dnsutils.v1 v1.0.1
@@ -107,3 +128,5 @@ gopkg.in/jcmturner/gokrb5.v7/crypto/rfc8009
 # gopkg.in/jcmturner/rpc.v1 v1.1.0
 gopkg.in/jcmturner/rpc.v1/mstypes
 gopkg.in/jcmturner/rpc.v1/ndr
+# gopkg.in/yaml.v2 v2.2.2
+gopkg.in/yaml.v2
