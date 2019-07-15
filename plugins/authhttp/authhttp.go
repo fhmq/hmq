@@ -114,19 +114,24 @@ func CheckSuper(clientID, username, password string) bool {
 
 //CheckACL check mqtt connect
 func CheckACL(username, access, topic string) bool {
-	req, err := http.NewRequest("GET", config.ACLURL, nil)
+	data := url.Values{}
+	data.Add("username", username)
+	data.Add("topic", topic)
+	data.Add("access", access)
+
+	req, err := http.NewRequest("GET", config.ACLURL, strings.NewReader(data.Encode()))
 	if err != nil {
 		log.Error("get acl: ", zap.Error(err))
 		return false
 	}
 
-	data := req.URL.Query()
+	// data := req.URL.Query()
 
-	data.Add("username", username)
-	data.Add("topic", topic)
-	data.Add("access", access)
-	req.URL.RawQuery = data.Encode()
-	//	log.Debugf("req is :%v", req)
+	// data.Add("username", username)
+	// data.Add("topic", topic)
+	// data.Add("access", access)
+	// req.URL.RawQuery = data.Encode()
+	// fmt.Println("req:", req)
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		log.Error("request acl: ", zap.Error(err))
