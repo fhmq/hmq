@@ -94,7 +94,7 @@ func Publish(e *plugins.Elements) {
 	if err != nil {
 		log.Error("publish kafka error: ", zap.Error(err))
 	}
-	fmt.Println("------------")
+	fmt.Println("------------", topic)
 
 	match, _ := regexp.MatchString(_ThingModelTopicRegexp, topic)
 	if match {
