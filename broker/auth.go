@@ -18,9 +18,9 @@ func (c *client) CheckTopicAuth(typ int, topic string) bool {
 	access := "sub"
 	switch typ {
 	case 1:
-		access = "pub"
+		access = "2"
 	case 2:
-		access = "sub"
+		access = "1"
 	}
 	username := string(c.info.username)
 	return authhttp.CheckACL(username, access, topic)
