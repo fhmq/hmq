@@ -16,6 +16,10 @@ func InitHTTPMoniter(b *Broker) {
 				conn.Close()
 			}
 		}
+		resp := map[string]int{
+			"code": 0,
+		}
+		c.JSON(200, &resp)
 	})
 
 	router.Run(":8080")
