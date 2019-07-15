@@ -10,7 +10,6 @@ import (
 	_ "net/http/pprof"
 	"runtime/debug"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/fhmq/hmq/plugins"
@@ -38,7 +37,6 @@ type Message struct {
 
 type Broker struct {
 	id             string
-	cid            uint64
 	mu             sync.Mutex
 	config         *Config
 	tlsConfig      *tls.Config
@@ -207,7 +205,6 @@ func (b *Broker) StartWebsocketListening() {
 
 func (b *Broker) wsHandler(ws *websocket.Conn) {
 	// io.Copy(ws, ws)
-	atomic.AddUint64(&b.cid, 1)
 	ws.PayloadType = websocket.BinaryFrame
 	b.handleConnection(CLIENT, ws)
 }
@@ -247,7 +244,6 @@ func (b *Broker) StartClientListening(Tls bool) {
 			continue
 		}
 		tmpDelay = ACCEPT_MIN_SLEEP
-		atomic.AddUint64(&b.cid, 1)
 		go b.handleConnection(CLIENT, conn)
 
 	}
