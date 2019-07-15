@@ -16,6 +16,7 @@ var (
 // NewDevLogger return a logger for dev builds
 func NewDevLogger() (*zap.Logger, error) {
 	logCfg := zap.NewDevelopmentConfig()
+	// logCfg.Level = zap.NewAtomicLevelAt(zap.DebugLevel)
 	logCfg.DisableStacktrace = true
 	return logCfg.Build()
 }

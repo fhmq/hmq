@@ -328,7 +328,7 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) {
 		return
 	}
 
-	log.Info("reconnect connect from ", zap.String("clientID", msg.ClientIdentifier))
+	log.Info("read connect from ", zap.String("clientID", msg.ClientIdentifier))
 
 	connack := packets.NewControlPacket(packets.Connack).(*packets.ConnackPacket)
 	connack.ReturnCode = packets.Accepted
