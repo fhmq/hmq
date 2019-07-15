@@ -269,9 +269,9 @@ func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) {
 func publish(sub *subscription, packet *packets.PublishPacket) {
 	var p *packets.PublishPacket
 	if sub.client.info.username != "root" {
-		p = unWrapPublishPacket(p)
+		p = unWrapPublishPacket(packet)
 	} else {
-		p = wrapPublishPacket(p)
+		p = wrapPublishPacket(packet)
 	}
 	err := sub.client.WriterPacket(p)
 	if err != nil {
