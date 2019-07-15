@@ -30,7 +30,7 @@ type Config struct {
 	TlsInfo TLSInfo   `json:"tlsInfo"`
 	Acl     bool      `json:"acl"`
 	AclConf string    `json:"aclConf"`
-	Debug   bool      `json:"-"`
+	Debug   bool      `json:"debug"`
 	Plugins []string  `json:"plugins"`
 }
 
@@ -109,9 +109,6 @@ func ConfigureConfig(args []string) (*Config, error) {
 		}
 	})
 
-	logger.InitLogger(config.Debug)
-	log = logger.Get().Named("Broker")
-
 	if configFile != "" {
 		tmpConfig, e := LoadConfig(configFile)
 		if e != nil {
@@ -120,6 +117,9 @@ func ConfigureConfig(args []string) (*Config, error) {
 			config = tmpConfig
 		}
 	}
+
+	logger.InitLogger(config.Debug)
+	log = logger.Get().Named("Broker")
 
 	if err := config.check(); err != nil {
 		return nil, err
@@ -133,7 +133,7 @@ func LoadConfig(filename string) (*Config, error) {
 
 	content, err := ioutil.ReadFile(filename)
 	if err != nil {
-		log.Error("Read config file error: ", zap.Error(err))
+		// log.Error("Read config file error: ", zap.Error(err))
 		return nil, err
 	}
 	// log.Info(string(content))
@@ -141,7 +141,7 @@ func LoadConfig(filename string) (*Config, error) {
 	var config Config
 	err = json.Unmarshal(content, &config)
 	if err != nil {
-		log.Error("Unmarshal config file error: ", zap.Error(err))
+		// log.Error("Unmarshal config file error: ", zap.Error(err))
 		return nil, err
 	}
 
