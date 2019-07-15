@@ -109,6 +109,8 @@ func (c *client) readLoop() {
 			//add read timeout
 			if err := nc.SetReadDeadline(time.Now().Add(timeOut)); err != nil {
 				log.Error("set read timeout error: ", zap.Error(err), zap.String("ClientID", c.info.clientID))
+				msg := &Message{client: c, packet: DisconnectdPacket}
+				b.SubmitWork(c.info.clientID, msg)
 				return
 			}
 

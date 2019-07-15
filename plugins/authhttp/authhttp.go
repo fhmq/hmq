@@ -2,6 +2,7 @@ package authhttp
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -43,6 +44,7 @@ func Init() {
 	if err != nil {
 		log.Fatal("Unmarshal config file error: ", zap.Error(err))
 	}
+	fmt.Println("http: config: ", config)
 
 	httpClient = &http.Client{
 		Transport: &http.Transport{
