@@ -3,7 +3,6 @@ package kafka
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io/ioutil"
 	"regexp"
 	"time"
@@ -55,6 +54,7 @@ func Init() {
 func connect() {
 	var err error
 	conf := sarama.NewConfig()
+	conf.Version = sarama.V1_1_1_0
 	kafkaClient, err = sarama.NewAsyncProducer(config.Addr, conf)
 	if err != nil {
 		log.Fatal("create kafka async producer failed: ", zap.Error(err))
@@ -94,12 +94,9 @@ func Publish(e *plugins.Elements) {
 	if err != nil {
 		log.Error("publish kafka error: ", zap.Error(err))
 	}
-	fmt.Println("------", e.Topic)
 
 	match, _ := regexp.MatchString(_ThingModelTopicRegexp, e.Topic)
 	if match && e.Action == plugins.Publish {
-
-		fmt.Println("------ match", e.Topic)
 		topic := "tmodel.msg.upstream"
 		err := publish(topic, key, e)
 		if err != nil {
