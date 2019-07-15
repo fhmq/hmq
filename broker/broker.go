@@ -133,6 +133,8 @@ func (b *Broker) Start() {
 		return
 	}
 
+	go InitHTTPMoniter(b)
+
 	//listen clinet over tcp
 	if b.config.Port != "" {
 		go b.StartClientListening(false)
@@ -162,10 +164,9 @@ func (b *Broker) Start() {
 	//system monitor
 	go StateMonitor()
 
-	if b.config.Debug {
-		startPProf()
-	}
-
+	// if b.config.Debug {
+	// 	startPProf()
+	// }
 }
 
 func startPProf() {
