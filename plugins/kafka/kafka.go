@@ -67,7 +67,7 @@ func connect() {
 }
 
 const (
-	_ThingModelTopicRegexp = `^/\$system/(.+)/(.+)/tmodel/(.*))$`
+	_ThingModelTopicRegexp = `^/\$system/(.+)/(.+)/tmodel/(.*)$`
 )
 
 //Publish publish to kafka
