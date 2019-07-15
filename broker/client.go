@@ -318,7 +318,7 @@ func (c *client) ProcessSubscribe(packet *packets.SubscribePacket) {
 
 		queue := strings.HasPrefix(topic, "$queue/")
 		if queue {
-			// topic = strings.TrimPrefix(topic, "$queue/")
+			topic = strings.TrimPrefix(topic, "$queue/")
 			if _, exists := b.queues[topic]; !exists {
 				b.queues[topic] = 0
 			}

@@ -3,6 +3,8 @@
 package broker
 
 import (
+	"strings"
+
 	"github.com/fhmq/hmq/plugins/authhttp"
 )
 
@@ -12,6 +14,10 @@ const (
 )
 
 func (c *client) CheckTopicAuth(typ int, topic string) bool {
+	if strings.HasPrefix(topic, "$queue/") {
+		topic = strings.TrimPrefix(topic, "$queue/")
+	}
+
 	if c.typ != CLIENT || !c.broker.pluginAuthHTTP {
 		return true
 	}
