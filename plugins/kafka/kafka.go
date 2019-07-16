@@ -89,7 +89,7 @@ func Publish(e *plugins.Elements) {
 		log.Error("error action: ", zap.String("action", e.Action))
 		return
 	}
-	key = e.Username
+	key = e.ClientID
 	err := publish(topic, key, e)
 	if err != nil {
 		log.Error("publish kafka error: ", zap.Error(err))
