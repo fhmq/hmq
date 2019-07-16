@@ -3,7 +3,6 @@ package kafka
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io/ioutil"
 	"regexp"
 	"time"
@@ -90,7 +89,7 @@ func Publish(e *plugins.Elements) {
 		log.Error("error action: ", zap.String("action", e.Action))
 		return
 	}
-	fmt.Println("publish kafka: ", topic, key)
+	// fmt.Println("publish kafka: ", topic, key)
 	err := publish(topic, key, e)
 	if err != nil {
 		log.Error("publish kafka error: ", zap.Error(err))
