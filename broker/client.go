@@ -38,21 +38,22 @@ const (
 )
 
 type client struct {
-	typ        int
-	mu         sync.Mutex
-	broker     *Broker
-	conn       net.Conn
-	info       info
-	route      route
-	status     int
-	ctx        context.Context
-	cancelFunc context.CancelFunc
-	session    *sessions.Session
-	subMap     map[string]*subscription
-	topicsMgr  *topics.Manager
-	subs       []interface{}
-	qoss       []byte
-	rmsgs      []*packets.PublishPacket
+	typ         int
+	mu          sync.Mutex
+	broker      *Broker
+	conn        net.Conn
+	info        info
+	route       route
+	status      int
+	ctx         context.Context
+	cancelFunc  context.CancelFunc
+	session     *sessions.Session
+	subMap      map[string]*subscription
+	topicsMgr   *topics.Manager
+	subs        []interface{}
+	qoss        []byte
+	rmsgs       []*packets.PublishPacket
+	routeSubMap map[string]uint64
 }
 
 type subscription struct {
@@ -334,6 +335,9 @@ func (c *client) ProcessSubscribe(packet *packets.SubscribePacket) {
 		}
 
 		c.subMap[t] = sub
+		if c.typ == ROUTER {
+			addSubMap(c.routeSubMap, topic)
+		}
 
 		c.session.AddTopic(t, qoss[i])
 		retcodes = append(retcodes, rqos)
@@ -374,23 +378,33 @@ func (c *client) ProcessUnSubscribe(packet *packets.UnsubscribePacket) {
 	topics := packet.Topics
 
 	for _, topic := range topics {
+		{
+			//publish kafka
+			if c.broker.pluginKafka && c.typ == CLIENT {
+				kafka.Publish(&plugins.Elements{
+					ClientID:  c.info.clientID,
+					Username:  c.info.username,
+					Action:    plugins.Unsubscribe,
+					Timestamp: time.Now().Unix(),
+					Topic:     topic,
+				})
+			}
+		}
+
 		t := []byte(topic)
 		sub, exist := c.subMap[topic]
 		if exist {
+			if c.typ == ROUTER {
+				retainNum := delSubMap(c.routeSubMap, topic)
+				if retainNum > 0 {
+					continue
+				}
+			}
 			c.topicsMgr.Unsubscribe(t, sub)
 			c.session.RemoveTopic(topic)
 			delete(c.subMap, topic)
 		}
 
-		if c.broker.pluginKafka && c.typ == CLIENT {
-			kafka.Publish(&plugins.Elements{
-				ClientID:  c.info.clientID,
-				Username:  c.info.username,
-				Action:    plugins.Unsubscribe,
-				Timestamp: time.Now().Unix(),
-				Topic:     topic,
-			})
-		}
 	}
 
 	unsuback := packets.NewControlPacket(packets.Unsuback).(*packets.UnsubackPacket)

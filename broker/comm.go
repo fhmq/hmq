@@ -92,6 +92,28 @@ func equal(k1, k2 interface{}) bool {
 	return false
 }
 
+func addSubMap(m map[string]uint64, topic string) {
+	subNum, exist := m[topic]
+	if exist {
+		m[topic] = subNum + 1
+	} else {
+		m[topic] = 1
+	}
+}
+
+func delSubMap(m map[string]uint64, topic string) uint64 {
+	subNum, exist := m[topic]
+	if exist {
+		if subNum > 1 {
+			m[topic] = subNum - 1
+			return subNum - 1
+		}
+	} else {
+		m[topic] = 0
+	}
+	return 0
+}
+
 func GenUniqueId() string {
 	return uuid.NewV4().String()
 }
