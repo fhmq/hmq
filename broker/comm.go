@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tidwall/gjson"
+	"go.uber.org/zap"
 
 	"github.com/eclipse/paho.mqtt.golang/packets"
 	uuid "github.com/satori/go.uuid"
@@ -135,4 +136,17 @@ func unWrapPublishPacket(packet *packets.PublishPacket) *packets.PublishPacket {
 		p.Payload = []byte(gjson.GetBytes(p.Payload, "payload").String())
 	}
 	return p
+}
+
+func publish(sub *subscription, packet *packets.PublishPacket) {
+	var p *packets.PublishPacket
+	if sub.client.info.username != "root" {
+		p = unWrapPublishPacket(packet)
+	} else {
+		p = wrapPublishPacket(packet)
+	}
+	err := sub.client.WriterPacket(p)
+	if err != nil {
+		log.Error("process message for psub error,  ", zap.Error(err))
+	}
 }

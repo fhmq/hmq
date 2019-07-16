@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/fhmq/hmq/plugins"
-	"github.com/fhmq/hmq/plugins/kafka"
 
 	"github.com/eclipse/paho.mqtt.golang/packets"
 	"github.com/fhmq/hmq/lib/sessions"
@@ -110,16 +109,14 @@ func (c *client) readLoop() {
 			//add read timeout
 			if err := nc.SetReadDeadline(time.Now().Add(timeOut)); err != nil {
 				log.Error("set read timeout error: ", zap.Error(err), zap.String("ClientID", c.info.clientID))
-				msg := &Message{client: c, packet: DisconnectdPacket}
-				b.SubmitWork(c.info.clientID, msg)
+				c.Close()
 				return
 			}
 
 			packet, err := packets.ReadPacket(nc)
 			if err != nil {
 				log.Error("read packet error: ", zap.Error(err), zap.String("ClientID", c.info.clientID))
-				msg := &Message{client: c, packet: DisconnectdPacket}
-				b.SubmitWork(c.info.clientID, msg)
+				c.Close()
 				return
 			}
 
@@ -139,7 +136,11 @@ func ProcessMessage(msg *Message) {
 	if ca == nil {
 		return
 	}
-	log.Debug("Recv message:", zap.String("message type", reflect.TypeOf(msg.packet).String()[9:]), zap.String("ClientID", c.info.clientID))
+
+	if c.typ == CLIENT {
+		log.Debug("Recv message:", zap.String("message type", reflect.TypeOf(msg.packet).String()[9:]), zap.String("ClientID", c.info.clientID))
+	}
+
 	switch ca.(type) {
 	case *packets.ConnackPacket:
 	case *packets.ConnectPacket:
@@ -169,31 +170,76 @@ func ProcessMessage(msg *Message) {
 }
 
 func (c *client) ProcessPublish(packet *packets.PublishPacket) {
+	switch c.typ {
+	case CLIENT:
+		c.processClientPublish(packet)
+	case ROUTER:
+		c.processRouterPublish(packet)
+	case CLUSTER:
+		c.processRemotePublish(packet)
+	}
+
+}
+
+func (c *client) processRemotePublish(packet *packets.PublishPacket) {
 	if c.status == Disconnected {
 		return
 	}
 
 	topic := packet.TopicName
-	if topic == BrokerInfoTopic && c.typ == CLUSTER {
+	if topic == BrokerInfoTopic {
 		c.ProcessInfo(packet)
 		return
 	}
 
-	if !c.CheckTopicAuth(PUB, topic) {
+}
+
+func (c *client) processRouterPublish(packet *packets.PublishPacket) {
+	if c.status == Disconnected {
+		return
+	}
+
+	switch packet.Qos {
+	case QosAtMostOnce:
+		c.ProcessPublishMessage(packet)
+	case QosAtLeastOnce:
+		puback := packets.NewControlPacket(packets.Puback).(*packets.PubackPacket)
+		puback.MessageID = packet.MessageID
+		if err := c.WriterPacket(puback); err != nil {
+			log.Error("send puback error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
+			return
+		}
+		c.ProcessPublishMessage(packet)
+	case QosExactlyOnce:
+		return
+	default:
+		log.Error("publish with unknown qos", zap.String("ClientID", c.info.clientID))
+		return
+	}
+
+}
+
+func (c *client) processClientPublish(packet *packets.PublishPacket) {
+	if c.status == Disconnected {
+		return
+	}
+
+	topic := packet.TopicName
+
+	if !c.broker.CheckTopicAuth(PUB, c.info.username, topic) {
 		log.Error("Pub Topics Auth failed, ", zap.String("topic", topic), zap.String("ClientID", c.info.clientID))
 		return
 	}
 
-	if c.broker.pluginKafka && c.typ == CLIENT {
-		kafka.Publish(&plugins.Elements{
-			ClientID:  c.info.clientID,
-			Username:  c.info.username,
-			Action:    plugins.Publish,
-			Timestamp: time.Now().Unix(),
-			Payload:   string(packet.Payload),
-			Topic:     topic,
-		})
-	}
+	//publish kafka
+	c.broker.Publish(&plugins.Elements{
+		ClientID:  c.info.clientID,
+		Username:  c.info.username,
+		Action:    plugins.Publish,
+		Timestamp: time.Now().Unix(),
+		Payload:   string(packet.Payload),
+		Topic:     topic,
+	})
 
 	switch packet.Qos {
 	case QosAtMostOnce:
@@ -229,9 +275,7 @@ func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) {
 		}
 	}
 
-	c.mu.Lock()
 	err := c.topicsMgr.Subscribers([]byte(packet.TopicName), packet.Qos, &c.subs, &c.qoss)
-	c.mu.Unlock()
 	if err != nil {
 		log.Error("Error retrieving subscribers list: ", zap.String("ClientID", c.info.clientID))
 		return
@@ -269,20 +313,16 @@ func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) {
 
 }
 
-func publish(sub *subscription, packet *packets.PublishPacket) {
-	var p *packets.PublishPacket
-	if sub.client.info.username != "root" {
-		p = unWrapPublishPacket(packet)
-	} else {
-		p = wrapPublishPacket(packet)
-	}
-	err := sub.client.WriterPacket(p)
-	if err != nil {
-		log.Error("process message for psub error,  ", zap.Error(err))
+func (c *client) ProcessSubscribe(packet *packets.SubscribePacket) {
+	switch c.typ {
+	case CLIENT:
+		c.processClientSubscribe(packet)
+	case ROUTER:
+		c.processRouterSubscribe(packet)
 	}
 }
 
-func (c *client) ProcessSubscribe(packet *packets.SubscribePacket) {
+func (c *client) processClientSubscribe(packet *packets.SubscribePacket) {
 	if c.status == Disconnected {
 		return
 	}
@@ -301,21 +341,19 @@ func (c *client) ProcessSubscribe(packet *packets.SubscribePacket) {
 	for i, topic := range topics {
 		t := topic
 		//check topic auth for client
-		if !c.CheckTopicAuth(SUB, topic) {
+		if c.broker.CheckTopicAuth(SUB, c.info.username, topic) {
 			log.Error("Sub topic Auth failed: ", zap.String("topic", topic), zap.String("ClientID", c.info.clientID))
 			retcodes = append(retcodes, QosFailure)
 			continue
 		}
 
-		if c.broker.pluginKafka && c.typ == CLIENT {
-			kafka.Publish(&plugins.Elements{
-				ClientID:  c.info.clientID,
-				Username:  c.info.username,
-				Action:    plugins.Subscribe,
-				Timestamp: time.Now().Unix(),
-				Topic:     topic,
-			})
-		}
+		b.Publish(&plugins.Elements{
+			ClientID:  c.info.clientID,
+			Username:  c.info.username,
+			Action:    plugins.Subscribe,
+			Timestamp: time.Now().Unix(),
+			Topic:     topic,
+		})
 
 		queue := strings.HasPrefix(topic, "$queue/")
 		if queue {
@@ -335,9 +373,6 @@ func (c *client) ProcessSubscribe(packet *packets.SubscribePacket) {
 		}
 
 		c.subMap[t] = sub
-		if c.typ == ROUTER {
-			addSubMap(c.routeSubMap, topic)
-		}
 
 		c.session.AddTopic(t, qoss[i])
 		retcodes = append(retcodes, rqos)
@@ -353,9 +388,7 @@ func (c *client) ProcessSubscribe(packet *packets.SubscribePacket) {
 		return
 	}
 	//broadcast subscribe message
-	if c.typ == CLIENT {
-		go b.BroadcastSubOrUnsubMessage(packet)
-	}
+	go b.BroadcastSubOrUnsubMessage(packet)
 
 	//process retain message
 	for _, rm := range c.rmsgs {
@@ -367,7 +400,100 @@ func (c *client) ProcessSubscribe(packet *packets.SubscribePacket) {
 	}
 }
 
+func (c *client) processRouterSubscribe(packet *packets.SubscribePacket) {
+	if c.status == Disconnected {
+		return
+	}
+
+	b := c.broker
+	if b == nil {
+		return
+	}
+	topics := packet.Topics
+	qoss := packet.Qoss
+
+	suback := packets.NewControlPacket(packets.Suback).(*packets.SubackPacket)
+	suback.MessageID = packet.MessageID
+	var retcodes []byte
+
+	for i, topic := range topics {
+		t := topic
+		queue := strings.HasPrefix(topic, "$queue/")
+		if queue {
+			topic = strings.TrimPrefix(topic, "$queue/")
+		}
+
+		sub := &subscription{
+			topic:  t,
+			qos:    qoss[i],
+			client: c,
+			queue:  queue,
+		}
+
+		rqos, err := c.topicsMgr.Subscribe([]byte(topic), qoss[i], sub)
+		if err != nil {
+			return
+		}
+
+		c.subMap[t] = sub
+		addSubMap(c.routeSubMap, topic)
+		retcodes = append(retcodes, rqos)
+	}
+
+	suback.ReturnCodes = retcodes
+
+	err := c.WriterPacket(suback)
+	if err != nil {
+		log.Error("send suback error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
+		return
+	}
+}
+
 func (c *client) ProcessUnSubscribe(packet *packets.UnsubscribePacket) {
+	switch c.typ {
+	case CLIENT:
+		c.processClientUnSubscribe(packet)
+	case ROUTER:
+		c.processRouterUnSubscribe(packet)
+	}
+}
+
+func (c *client) processRouterUnSubscribe(packet *packets.UnsubscribePacket) {
+	if c.status == Disconnected {
+		return
+	}
+	b := c.broker
+	if b == nil {
+		return
+	}
+	topics := packet.Topics
+
+	for _, topic := range topics {
+		t := []byte(topic)
+		sub, exist := c.subMap[topic]
+		if exist {
+			retainNum := delSubMap(c.routeSubMap, topic)
+			if retainNum > 0 {
+				continue
+			}
+
+			c.topicsMgr.Unsubscribe(t, sub)
+			delete(c.subMap, topic)
+		}
+
+	}
+
+	unsuback := packets.NewControlPacket(packets.Unsuback).(*packets.UnsubackPacket)
+	unsuback.MessageID = packet.MessageID
+
+	err := c.WriterPacket(unsuback)
+	if err != nil {
+		log.Error("send unsuback error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
+		return
+	}
+}
+
+func (c *client) processClientUnSubscribe(packet *packets.UnsubscribePacket) {
 	if c.status == Disconnected {
 		return
 	}
@@ -380,26 +506,20 @@ func (c *client) ProcessUnSubscribe(packet *packets.UnsubscribePacket) {
 	for _, topic := range topics {
 		{
 			//publish kafka
-			if c.broker.pluginKafka && c.typ == CLIENT {
-				kafka.Publish(&plugins.Elements{
-					ClientID:  c.info.clientID,
-					Username:  c.info.username,
-					Action:    plugins.Unsubscribe,
-					Timestamp: time.Now().Unix(),
-					Topic:     topic,
-				})
-			}
+
+			b.Publish(&plugins.Elements{
+				ClientID:  c.info.clientID,
+				Username:  c.info.username,
+				Action:    plugins.Unsubscribe,
+				Timestamp: time.Now().Unix(),
+				Topic:     topic,
+			})
+
 		}
 
 		t := []byte(topic)
 		sub, exist := c.subMap[topic]
 		if exist {
-			if c.typ == ROUTER {
-				retainNum := delSubMap(c.routeSubMap, topic)
-				if retainNum > 0 {
-					continue
-				}
-			}
 			c.topicsMgr.Unsubscribe(t, sub)
 			c.session.RemoveTopic(topic)
 			delete(c.subMap, topic)
@@ -416,9 +536,7 @@ func (c *client) ProcessUnSubscribe(packet *packets.UnsubscribePacket) {
 		return
 	}
 	// //process ubsubscribe message
-	if c.typ == CLIENT {
-		b.BroadcastSubOrUnsubMessage(packet)
-	}
+	b.BroadcastSubOrUnsubMessage(packet)
 }
 
 func (c *client) ProcessPing() {
@@ -445,21 +563,19 @@ func (c *client) Close() {
 	// time.Sleep(1 * time.Second)
 	// c.status = Disconnected
 
-	if c.broker.pluginKafka && c.typ == CLIENT {
-		kafka.Publish(&plugins.Elements{
-			ClientID:  c.info.clientID,
-			Username:  c.info.username,
-			Action:    plugins.Disconnect,
-			Timestamp: time.Now().Unix(),
-		})
-	}
+	b := c.broker
+	b.Publish(&plugins.Elements{
+		ClientID:  c.info.clientID,
+		Username:  c.info.username,
+		Action:    plugins.Disconnect,
+		Timestamp: time.Now().Unix(),
+	})
 
 	if c.conn != nil {
 		c.conn.Close()
 		c.conn = nil
 	}
 
-	b := c.broker
 	subs := c.subMap
 	if b != nil {
 		b.removeClient(c)

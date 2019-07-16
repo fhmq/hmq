@@ -9,12 +9,12 @@ import (
 )
 
 const (
-	PUB = 1
-	SUB = 2
+	SUB = "1"
+	PUB = "2"
 )
 
-func (c *client) CheckTopicAuth(typ int, topic string) bool {
-	if c.typ != CLIENT || !c.broker.pluginAuthHTTP {
+func (b *Broker) CheckTopicAuth(action, username, topic string) bool {
+	if !b.pluginAuthHTTP {
 		return true
 	}
 
@@ -26,15 +26,7 @@ func (c *client) CheckTopicAuth(typ int, topic string) bool {
 		topic = strings.TrimPrefix(topic, "$queue/")
 	}
 
-	access := "sub"
-	switch typ {
-	case 1:
-		access = "2"
-	case 2:
-		access = "1"
-	}
-	username := string(c.info.username)
-	return authhttp.CheckACL(username, access, topic)
+	return authhttp.CheckACL(username, action, topic)
 
 }
 

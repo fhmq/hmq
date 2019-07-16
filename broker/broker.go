@@ -353,8 +353,8 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) {
 		return
 	}
 
-	if b.pluginKafka && typ == CLIENT {
-		kafka.Publish(&plugins.Elements{
+	if typ == CLIENT {
+		b.Publish(&plugins.Elements{
 			ClientID:  string(msg.ClientIdentifier),
 			Username:  string(msg.Username),
 			Action:    plugins.Connect,
@@ -424,8 +424,6 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) {
 		}
 		b.routes.Store(cid, c)
 	}
-
-	// mpool := b.messagePool[fnv1a.HashString64(cid)%MessagePoolNum]
 
 	c.readLoop()
 }
