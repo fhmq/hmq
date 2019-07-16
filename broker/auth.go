@@ -14,19 +14,19 @@ const (
 )
 
 func (b *Broker) CheckTopicAuth(action, username, topic string) bool {
-	if !b.pluginAuthHTTP {
-		return true
+	if b.pluginAuthHTTP {
+		if strings.HasPrefix(topic, "$SYS/broker/connection/clients/") {
+			return true
+		}
+
+		if strings.HasPrefix(topic, "$queue/") {
+			topic = strings.TrimPrefix(topic, "$queue/")
+		}
+
+		return authhttp.CheckACL(username, action, topic)
 	}
 
-	if strings.HasPrefix(topic, "$SYS/broker/connection/clients/") {
-		return true
-	}
-
-	if strings.HasPrefix(topic, "$queue/") {
-		topic = strings.TrimPrefix(topic, "$queue/")
-	}
-
-	return authhttp.CheckACL(username, action, topic)
+	return true
 
 }
 
@@ -38,6 +38,6 @@ func (b *Broker) CheckConnectAuth(clientID, username, password string) bool {
 		return authhttp.CheckAuth(clientID, username, password)
 	}
 
-	return false
+	return true
 
 }

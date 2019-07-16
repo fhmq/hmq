@@ -338,7 +338,7 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) {
 		}
 	}
 
-	if typ == CLIENT && b.CheckConnectAuth(string(msg.ClientIdentifier), string(msg.Username), string(msg.Password)) {
+	if typ == CLIENT && !b.CheckConnectAuth(string(msg.ClientIdentifier), string(msg.Username), string(msg.Password)) {
 		connack.ReturnCode = packets.ErrRefusedNotAuthorised
 		err = connack.Write(conn)
 		if err != nil {
