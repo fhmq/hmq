@@ -341,7 +341,7 @@ func (c *client) processClientSubscribe(packet *packets.SubscribePacket) {
 	for i, topic := range topics {
 		t := topic
 		//check topic auth for client
-		if c.broker.CheckTopicAuth(SUB, c.info.username, topic) {
+		if !b.CheckTopicAuth(SUB, c.info.username, topic) {
 			log.Error("Sub topic Auth failed: ", zap.String("topic", topic), zap.String("ClientID", c.info.clientID))
 			retcodes = append(retcodes, QosFailure)
 			continue
