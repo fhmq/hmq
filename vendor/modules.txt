@@ -43,6 +43,8 @@ github.com/mattn/go-isatty
 github.com/modern-go/concurrent
 # github.com/modern-go/reflect2 v1.0.1
 github.com/modern-go/reflect2
+# github.com/patrickmn/go-cache v2.1.0+incompatible
+github.com/patrickmn/go-cache
 # github.com/pierrec/lz4 v0.0.0-20190327172049-315a67e90e41
 github.com/pierrec/lz4
 github.com/pierrec/lz4/internal/xxh32

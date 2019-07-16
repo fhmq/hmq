@@ -50,8 +50,6 @@ type Broker struct {
 	sessionMgr     *sessions.Manager
 	pluginAuthHTTP bool
 	pluginKafka    bool
-
-	// messagePool []chan *Message
 }
 
 func newMessagePool() []chan *Message {
@@ -329,10 +327,19 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) {
 	log.Info("read connect from ", zap.String("clientID", msg.ClientIdentifier))
 
 	connack := packets.NewControlPacket(packets.Connack).(*packets.ConnackPacket)
-	connack.ReturnCode = packets.Accepted
 	connack.SessionPresent = msg.CleanSession
+	connack.ReturnCode = msg.Validate()
 
-	if b.pluginAuthHTTP == true && authhttp.CheckAuth(string(msg.ClientIdentifier), string(msg.Username), string(msg.Password)) {
+	if connack.ReturnCode != packets.Accepted {
+		err = connack.Write(conn)
+		if err != nil {
+			log.Error("send connack error, ", zap.Error(err), zap.String("clientID", msg.ClientIdentifier))
+			return
+		}
+	}
+
+	if typ == CLIENT && b.CheckConnectAuth(string(msg.ClientIdentifier), string(msg.Username), string(msg.Password)) {
+		connack.ReturnCode = packets.ErrRefusedNotAuthorised
 		err = connack.Write(conn)
 		if err != nil {
 			log.Error("send connack error, ", zap.Error(err), zap.String("clientID", msg.ClientIdentifier))

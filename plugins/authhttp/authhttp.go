@@ -58,6 +58,16 @@ func Init() {
 
 //CheckAuth check mqtt connect
 func CheckAuth(clientID, username, password string) bool {
+	action := "connect"
+	{
+		aCache := checkCache(action, clientID, username, password, "")
+		if aCache != nil {
+			if aCache.password == password && aCache.username == username && aCache.action == action {
+				return true
+			}
+		}
+	}
+
 	data := url.Values{}
 	data.Add("username", username)
 	data.Add("clientid", clientID)
@@ -79,6 +89,7 @@ func CheckAuth(clientID, username, password string) bool {
 
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusOK {
+		addCache(action, clientID, username, password, "")
 		return true
 	}
 	return false
@@ -86,6 +97,16 @@ func CheckAuth(clientID, username, password string) bool {
 
 //CheckSuper check mqtt connect
 func CheckSuper(clientID, username, password string) bool {
+	action := "connect"
+	{
+		aCache := checkCache(action, clientID, username, password, "")
+		if aCache != nil {
+			if aCache.password == password && aCache.username == username && aCache.action == action {
+				return true
+			}
+		}
+	}
+
 	data := url.Values{}
 	data.Add("username", username)
 	data.Add("clientid", clientID)
@@ -114,6 +135,16 @@ func CheckSuper(clientID, username, password string) bool {
 
 //CheckACL check mqtt connect
 func CheckACL(username, access, topic string) bool {
+	action := access
+	{
+		aCache := checkCache(action, "", username, "", topic)
+		if aCache != nil {
+			if aCache.topic == topic && aCache.action == action {
+				return true
+			}
+		}
+	}
+
 	req, err := http.NewRequest("GET", config.ACLURL, nil)
 	if err != nil {
 		log.Error("get acl: ", zap.Error(err))
@@ -135,6 +166,7 @@ func CheckACL(username, access, topic string) bool {
 
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusOK {
+		addCache(action, "", username, "", topic)
 		return true
 	}
 	return false

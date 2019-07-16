@@ -14,6 +14,10 @@ const (
 )
 
 func (c *client) CheckTopicAuth(typ int, topic string) bool {
+	if c.typ != CLIENT || !c.broker.pluginAuthHTTP {
+		return true
+	}
+
 	if strings.HasPrefix(topic, "$SYS/broker/connection/clients/") {
 		return true
 	}
@@ -22,9 +26,6 @@ func (c *client) CheckTopicAuth(typ int, topic string) bool {
 		topic = strings.TrimPrefix(topic, "$queue/")
 	}
 
-	if c.typ != CLIENT || !c.broker.pluginAuthHTTP {
-		return true
-	}
 	access := "sub"
 	switch typ {
 	case 1:
@@ -34,5 +35,17 @@ func (c *client) CheckTopicAuth(typ int, topic string) bool {
 	}
 	username := string(c.info.username)
 	return authhttp.CheckACL(username, access, topic)
+
+}
+
+func (b *Broker) CheckConnectAuth(clientID, username, password string) bool {
+	if b.pluginAuthHTTP {
+		if clientID == "" || username == "" {
+			return false
+		}
+		return authhttp.CheckAuth(clientID, username, password)
+	}
+
+	return false
 
 }
