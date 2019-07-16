@@ -14,6 +14,10 @@ const (
 )
 
 func (c *client) CheckTopicAuth(typ int, topic string) bool {
+	if strings.HasPrefix(topic, "$SYS/broker/connection/clients/") {
+		return true
+	}
+
 	if strings.HasPrefix(topic, "$queue/") {
 		topic = strings.TrimPrefix(topic, "$queue/")
 	}

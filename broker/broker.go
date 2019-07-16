@@ -46,7 +46,6 @@ type Broker struct {
 	remotes        sync.Map
 	nodes          map[string]interface{}
 	clusterPool    chan *Message
-	queues         map[string]int
 	topicsMgr      *topics.Manager
 	sessionMgr     *sessions.Manager
 	pluginAuthHTTP bool
@@ -70,7 +69,6 @@ func NewBroker(config *Config) (*Broker, error) {
 		config:      config,
 		wpool:       pool.New(config.Worker),
 		nodes:       make(map[string]interface{}),
-		queues:      make(map[string]int),
 		clusterPool: make(chan *Message),
 	}
 

@@ -7,7 +7,7 @@ import (
 func InitHTTPMoniter(b *Broker) {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.Default()
-	router.DELETE("api/v3/connections/:clientid", func(c *gin.Context) {
+	router.DELETE("api/v1/connections/:clientid", func(c *gin.Context) {
 		clientid := c.Param("clientid")
 		cli, ok := b.clients.Load(clientid)
 		if ok {

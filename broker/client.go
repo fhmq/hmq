@@ -319,9 +319,6 @@ func (c *client) ProcessSubscribe(packet *packets.SubscribePacket) {
 		queue := strings.HasPrefix(topic, "$queue/")
 		if queue {
 			topic = strings.TrimPrefix(topic, "$queue/")
-			if _, exists := b.queues[topic]; !exists {
-				b.queues[topic] = 0
-			}
 		}
 
 		sub := &subscription{
@@ -336,8 +333,9 @@ func (c *client) ProcessSubscribe(packet *packets.SubscribePacket) {
 			return
 		}
 
-		c.subMap[topic] = sub
-		c.session.AddTopic(topic, qoss[i])
+		c.subMap[t] = sub
+
+		c.session.AddTopic(t, qoss[i])
 		retcodes = append(retcodes, rqos)
 		c.topicsMgr.Retained([]byte(topic), &c.rmsgs)
 
