@@ -336,6 +336,7 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) {
 			log.Error("send connack error, ", zap.Error(err), zap.String("clientID", msg.ClientIdentifier))
 			return
 		}
+		return
 	}
 
 	if typ == CLIENT && !b.CheckConnectAuth(string(msg.ClientIdentifier), string(msg.Username), string(msg.Password)) {
@@ -345,6 +346,7 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) {
 			log.Error("send connack error, ", zap.Error(err), zap.String("clientID", msg.ClientIdentifier))
 			return
 		}
+		return
 	}
 
 	err = connack.Write(conn)
