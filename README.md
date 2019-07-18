@@ -88,9 +88,9 @@ Common Options:
 
 ### QUEUE SUBSCRIBE
 ~~~
-| Prefix        | Examples                        |
-| ------------- |---------------------------------|
-| $queue/       | mosquitto_sub -t ‘$queue/topic’ |
+| Prefix              | Examples                                  | Publish                      |
+| ------------------- |-------------------------------------------|--------------------------- --|
+| $share/<group>/topic  | mosquitto_sub -t ‘$share/<group>/topic’ | mosquitto_pub -t ‘topic’     |
 ~~~
 
 ### Cluster
