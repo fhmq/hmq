@@ -132,7 +132,7 @@ func wrapPublishPacket(packet *packets.PublishPacket) *packets.PublishPacket {
 
 func unWrapPublishPacket(packet *packets.PublishPacket) *packets.PublishPacket {
 	p := packet.Copy()
-	if gjson.GetBytes(p.Payload, "paload").Exists() {
+	if gjson.GetBytes(p.Payload, "payload").Exists() {
 		p.Payload = []byte(gjson.GetBytes(p.Payload, "payload").String())
 	}
 	return p
