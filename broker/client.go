@@ -300,7 +300,7 @@ func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) {
 		return
 	}
 
-	// log.Info("psubs num: ", len(r.psubs))
+	// fmt.Println("psubs num: ", len(c.subs))
 	if len(c.subs) == 0 {
 		return
 	}
@@ -388,7 +388,7 @@ func (c *client) processClientSubscribe(packet *packets.SubscribePacket) {
 		}
 
 		sub := &subscription{
-			topic:     t,
+			topic:     topic,
 			qos:       qoss[i],
 			client:    c,
 			share:     share,
@@ -397,7 +397,9 @@ func (c *client) processClientSubscribe(packet *packets.SubscribePacket) {
 
 		rqos, err := c.topicsMgr.Subscribe([]byte(topic), qoss[i], sub)
 		if err != nil {
-			return
+			log.Error("subscribe error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
+			retcodes = append(retcodes, QosFailure)
+			continue
 		}
 
 		c.subMap[t] = sub
@@ -460,7 +462,7 @@ func (c *client) processRouterSubscribe(packet *packets.SubscribePacket) {
 		}
 
 		sub := &subscription{
-			topic:     t,
+			topic:     topic,
 			qos:       qoss[i],
 			client:    c,
 			share:     share,
@@ -469,7 +471,9 @@ func (c *client) processRouterSubscribe(packet *packets.SubscribePacket) {
 
 		rqos, err := c.topicsMgr.Subscribe([]byte(topic), qoss[i], sub)
 		if err != nil {
-			return
+			log.Error("subscribe error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
+			retcodes = append(retcodes, QosFailure)
+			continue
 		}
 
 		c.subMap[t] = sub
@@ -506,7 +510,6 @@ func (c *client) processRouterUnSubscribe(packet *packets.UnsubscribePacket) {
 	topics := packet.Topics
 
 	for _, topic := range topics {
-		t := []byte(topic)
 		sub, exist := c.subMap[topic]
 		if exist {
 			retainNum := delSubMap(c.routeSubMap, topic)
@@ -514,7 +517,7 @@ func (c *client) processRouterUnSubscribe(packet *packets.UnsubscribePacket) {
 				continue
 			}
 
-			c.topicsMgr.Unsubscribe(t, sub)
+			c.topicsMgr.Unsubscribe([]byte(sub.topic), sub)
 			delete(c.subMap, topic)
 		}
 
@@ -554,10 +557,9 @@ func (c *client) processClientUnSubscribe(packet *packets.UnsubscribePacket) {
 
 		}
 
-		t := []byte(topic)
 		sub, exist := c.subMap[topic]
 		if exist {
-			c.topicsMgr.Unsubscribe(t, sub)
+			c.topicsMgr.Unsubscribe([]byte(sub.topic), sub)
 			c.session.RemoveTopic(topic)
 			delete(c.subMap, topic)
 		}
@@ -614,8 +616,15 @@ func (c *client) Close() {
 	}
 
 	subs := c.subMap
+
 	if b != nil {
 		b.removeClient(c)
+		for _, sub := range subs {
+			err := b.topicsMgr.Unsubscribe([]byte(sub.topic), sub)
+			if err != nil {
+				log.Error("unsubscribe error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
+			}
+		}
 
 		if c.typ == CLIENT {
 			b.BroadcastUnSubscribe(subs)
