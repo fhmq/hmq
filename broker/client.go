@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"net"
 	"reflect"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -31,9 +32,18 @@ const (
 	REMOTE  = 2
 	CLUSTER = 3
 )
+
+const (
+	_GroupTopicRegexp = `^\$share/([0-9a-zA-Z_-]+)/(.*)$`
+)
+
 const (
 	Connected    = 1
 	Disconnected = 2
+)
+
+var (
+	groupCompile = regexp.MustCompile(_GroupTopicRegexp)
 )
 
 type client struct {
@@ -56,10 +66,11 @@ type client struct {
 }
 
 type subscription struct {
-	client *client
-	topic  string
-	qos    byte
-	queue  bool
+	client    *client
+	topic     string
+	qos       byte
+	share     bool
+	groupName string
 }
 
 type info struct {
@@ -303,7 +314,7 @@ func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) {
 					continue
 				}
 			}
-			if s.queue {
+			if s.share {
 				qsub = append(qsub, i)
 			} else {
 				publish(s, packet)
@@ -363,16 +374,25 @@ func (c *client) processClientSubscribe(packet *packets.SubscribePacket) {
 			Topic:     topic,
 		})
 
-		queue := strings.HasPrefix(topic, "$queue/")
-		if queue {
-			topic = strings.TrimPrefix(topic, "$queue/")
+		groupName := ""
+		share := false
+		if strings.HasPrefix(topic, "$share/") {
+			substr := groupCompile.FindStringSubmatch(topic)
+			if len(substr) != 3 {
+				retcodes = append(retcodes, QosFailure)
+				continue
+			}
+			share = true
+			groupName = substr[1]
+			topic = substr[2]
 		}
 
 		sub := &subscription{
-			topic:  t,
-			qos:    qoss[i],
-			client: c,
-			queue:  queue,
+			topic:     t,
+			qos:       qoss[i],
+			client:    c,
+			share:     share,
+			groupName: groupName,
 		}
 
 		rqos, err := c.topicsMgr.Subscribe([]byte(topic), qoss[i], sub)
@@ -426,16 +446,25 @@ func (c *client) processRouterSubscribe(packet *packets.SubscribePacket) {
 
 	for i, topic := range topics {
 		t := topic
-		queue := strings.HasPrefix(topic, "$queue/")
-		if queue {
-			topic = strings.TrimPrefix(topic, "$queue/")
+		groupName := ""
+		share := false
+		if strings.HasPrefix(topic, "$share/") {
+			substr := groupCompile.FindStringSubmatch(topic)
+			if len(substr) != 3 {
+				retcodes = append(retcodes, QosFailure)
+				continue
+			}
+			share = true
+			groupName = substr[1]
+			topic = substr[2]
 		}
 
 		sub := &subscription{
-			topic:  t,
-			qos:    qoss[i],
-			client: c,
-			queue:  queue,
+			topic:     t,
+			qos:       qoss[i],
+			client:    c,
+			share:     share,
+			groupName: groupName,
 		}
 
 		rqos, err := c.topicsMgr.Subscribe([]byte(topic), qoss[i], sub)
