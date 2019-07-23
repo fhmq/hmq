@@ -12,11 +12,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fhmq/hmq/broker/lib/sessions"
+	"github.com/fhmq/hmq/broker/lib/topics"
 	"github.com/fhmq/hmq/plugins"
 
 	"github.com/eclipse/paho.mqtt.golang/packets"
-	"github.com/fhmq/hmq/lib/sessions"
-	"github.com/fhmq/hmq/lib/topics"
 	"github.com/fhmq/hmq/plugins/authhttp"
 	"github.com/fhmq/hmq/plugins/kafka"
 	"github.com/fhmq/hmq/pool"

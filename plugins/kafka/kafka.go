@@ -2,10 +2,8 @@ package kafka
 
 import (
 	"encoding/json"
-	"errors"
 	"io/ioutil"
 	"regexp"
-	"time"
 
 	"github.com/Shopify/sarama"
 	"github.com/fhmq/hmq/logger"
@@ -26,12 +24,13 @@ var (
 
 //Config device kafka config
 type Config struct {
-	Addr             []string `json:"addr"`
-	ConnectTopic     string   `json:"onConnect"`
-	SubscribeTopic   string   `json:"onSubscribe"`
-	PublishTopic     string   `json:"onPublish"`
-	UnsubscribeTopic string   `json:"onUnsubscribe"`
-	DisconnectTopic  string   `json:"onDisconnect"`
+	Addr             []string          `json:"addr"`
+	ConnectTopic     string            `json:"onConnect"`
+	SubscribeTopic   string            `json:"onSubscribe"`
+	PublishTopic     string            `json:"onPublish"`
+	UnsubscribeTopic string            `json:"onUnsubscribe"`
+	DisconnectTopic  string            `json:"onDisconnect"`
+	RegexpMap        map[string]string `json:"regexpMap"`
 }
 
 //Init init kafak client
@@ -67,56 +66,63 @@ func connect() {
 	}()
 }
 
-const (
-	_ThingModelTopicRegexp = `^/\$system/(.+)/(.+)/tmodel/(.*)$`
-)
-
 //Publish publish to kafka
 func Publish(e *plugins.Elements) {
-	topic, key := "", e.ClientID
+	key := e.ClientID
+	var topics []string
 	switch e.Action {
 	case plugins.Connect:
-		topic = config.ConnectTopic
+		if config.ConnectTopic != "" {
+			topics = append(topics, config.ConnectTopic)
+		}
 	case plugins.Publish:
-		topic = config.PublishTopic
+		if config.PublishTopic != "" {
+			topics = append(topics, config.PublishTopic)
+		}
+		// foreach regexp map config
+		for reg, topic := range config.RegexpMap {
+			match, _ := regexp.MatchString(reg, e.Topic)
+			if match {
+				topics = append(topics, topic)
+			}
+		}
 	case plugins.Subscribe:
-		topic = config.SubscribeTopic
+		if config.SubscribeTopic != "" {
+			topics = append(topics, config.SubscribeTopic)
+		}
 	case plugins.Unsubscribe:
-		topic = config.UnsubscribeTopic
+		if config.UnsubscribeTopic != "" {
+			topics = append(topics, config.UnsubscribeTopic)
+		}
 	case plugins.Disconnect:
-		topic = config.DisconnectTopic
+		if config.DisconnectTopic != "" {
+			topics = append(topics, config.DisconnectTopic)
+		}
 	default:
 		log.Error("error action: ", zap.String("action", e.Action))
 		return
 	}
-	// fmt.Println("publish kafka: ", topic, key)
-	err := publish(topic, key, e)
+
+	err := publish(topics, key, e)
 	if err != nil {
 		log.Error("publish kafka error: ", zap.Error(err))
 	}
 
-	match, _ := regexp.MatchString(_ThingModelTopicRegexp, e.Topic)
-	if match && e.Action == plugins.Publish {
-		topic := "tmodel.msg.upstream"
-		err := publish(topic, key, e)
-		if err != nil {
-			log.Error("publish kafka error: ", zap.Error(err))
-		}
-	}
 }
 
-func publish(topic, key string, msg *plugins.Elements) error {
+func publish(topics []string, key string, msg *plugins.Elements) error {
 	payload, err := json.Marshal(msg)
 	if err != nil {
 		return err
 	}
-	select {
-	case kafkaClient.Input() <- &sarama.ProducerMessage{
-		Topic: topic,
-		Key:   sarama.ByteEncoder(key),
-		Value: sarama.ByteEncoder(payload)}:
-		return nil
-	case <-time.After(1 * time.Minute):
-		return errors.New("send to kafka time out")
+
+	for _, topic := range topics {
+		kafkaClient.Input() <- &sarama.ProducerMessage{
+			Topic: topic,
+			Key:   sarama.ByteEncoder(key),
+			Value: sarama.ByteEncoder(payload),
+		}
 	}
+
+	return nil
 }
