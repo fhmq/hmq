@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mqtt-broker
+data:
+  hmq.config: |
+    {
+      "workerNum": 4096,
+      "port": "1883",
+      "host": "0.0.0.0",
+      "plugins": ["authhttp","kafka"]
+    }
+
+  kafka.json: |
+    {
+        "addr": [
+            "127.0.0.1:9090"
+        ],
+        "onConnect": "onConnect",
+        "onPublish": "onPublish",
+        "onSubscribe": "onSubscribe",
+        "onDisconnect": "onDisconnect",
+        "onUnsubscribe": "onUnsubscribe",
+        "regexpMap": [
+                {
+                    "^/(.+)/(.+)/upload/(.*)$": "upload"
+                }
+            ]
+    }
+  
+  authhttp.json: |
+    {
+        "auth": "http://127.0.0.1:9090/mqtt/auth",
+        "acl": "http://127.0.0.1:9090/mqtt/acl",
+        "super": "http://127.0.0.1:9090/mqtt/superuser"
+    }
+    
+

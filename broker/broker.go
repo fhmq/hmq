@@ -10,13 +10,15 @@ import (
 	_ "net/http/pprof"
 	"runtime/debug"
 	"sync"
-	"sync/atomic"
 	"time"
 
+	"github.com/fhmq/hmq/broker/lib/sessions"
+	"github.com/fhmq/hmq/broker/lib/topics"
+	"github.com/fhmq/hmq/plugins"
+
 	"github.com/eclipse/paho.mqtt.golang/packets"
-	"github.com/fhmq/hmq/lib/acl"
-	"github.com/fhmq/hmq/lib/sessions"
-	"github.com/fhmq/hmq/lib/topics"
+	"github.com/fhmq/hmq/plugins/authhttp"
+	"github.com/fhmq/hmq/plugins/kafka"
 	"github.com/fhmq/hmq/pool"
 	"github.com/shirou/gopsutil/mem"
 	"go.uber.org/zap"
@@ -34,22 +36,20 @@ type Message struct {
 }
 
 type Broker struct {
-	id          string
-	cid         uint64
-	mu          sync.Mutex
-	config      *Config
-	tlsConfig   *tls.Config
-	AclConfig   *acl.ACLConfig
-	wpool       *pool.WorkerPool
-	clients     sync.Map
-	routes      sync.Map
-	remotes     sync.Map
-	nodes       map[string]interface{}
-	clusterPool chan *Message
-	queues      map[string]int
-	topicsMgr   *topics.Manager
-	sessionMgr  *sessions.Manager
-	// messagePool []chan *Message
+	id             string
+	mu             sync.Mutex
+	config         *Config
+	tlsConfig      *tls.Config
+	wpool          *pool.WorkerPool
+	clients        sync.Map
+	routes         sync.Map
+	remotes        sync.Map
+	nodes          map[string]interface{}
+	clusterPool    chan *Message
+	topicsMgr      *topics.Manager
+	sessionMgr     *sessions.Manager
+	pluginAuthHTTP bool
+	pluginKafka    bool
 }
 
 func newMessagePool() []chan *Message {
@@ -67,7 +67,6 @@ func NewBroker(config *Config) (*Broker, error) {
 		config:      config,
 		wpool:       pool.New(config.Worker),
 		nodes:       make(map[string]interface{}),
-		queues:      make(map[string]int),
 		clusterPool: make(chan *Message),
 	}
 
@@ -92,15 +91,18 @@ func NewBroker(config *Config) (*Broker, error) {
 		}
 		b.tlsConfig = tlsconfig
 	}
-	if b.config.Acl {
-		aclconfig, err := acl.AclConfigLoad(b.config.AclConf)
-		if err != nil {
-			log.Error("Load acl conf error", zap.Error(err))
-			return nil, err
+
+	for _, plugin := range b.config.Plugins {
+		switch plugin {
+		case authhttp.AuthHTTP:
+			authhttp.Init()
+			b.pluginAuthHTTP = true
+		case kafka.Kafka:
+			kafka.Init()
+			b.pluginKafka = true
 		}
-		b.AclConfig = aclconfig
-		b.StartAclWatcher()
 	}
+
 	return b, nil
 }
 
@@ -124,6 +126,8 @@ func (b *Broker) Start() {
 		log.Error("broker is null")
 		return
 	}
+
+	go InitHTTPMoniter(b)
 
 	//listen clinet over tcp
 	if b.config.Port != "" {
@@ -154,10 +158,9 @@ func (b *Broker) Start() {
 	//system monitor
 	go StateMonitor()
 
-	if b.config.Debug {
-		startPProf()
-	}
-
+	// if b.config.Debug {
+	// 	startPProf()
+	// }
 }
 
 func startPProf() {
@@ -198,7 +201,6 @@ func (b *Broker) StartWebsocketListening() {
 
 func (b *Broker) wsHandler(ws *websocket.Conn) {
 	// io.Copy(ws, ws)
-	atomic.AddUint64(&b.cid, 1)
 	ws.PayloadType = websocket.BinaryFrame
 	b.handleConnection(CLIENT, ws)
 }
@@ -238,7 +240,6 @@ func (b *Broker) StartClientListening(Tls bool) {
 			continue
 		}
 		tmpDelay = ACCEPT_MIN_SLEEP
-		atomic.AddUint64(&b.cid, 1)
 		go b.handleConnection(CLIENT, conn)
 
 	}
@@ -323,15 +324,44 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) {
 		return
 	}
 
-	log.Info("reconnect connect from ", zap.String("clientID", msg.ClientIdentifier))
+	log.Info("read connect from ", zap.String("clientID", msg.ClientIdentifier))
 
 	connack := packets.NewControlPacket(packets.Connack).(*packets.ConnackPacket)
-	connack.ReturnCode = packets.Accepted
 	connack.SessionPresent = msg.CleanSession
+	connack.ReturnCode = msg.Validate()
+
+	if connack.ReturnCode != packets.Accepted {
+		err = connack.Write(conn)
+		if err != nil {
+			log.Error("send connack error, ", zap.Error(err), zap.String("clientID", msg.ClientIdentifier))
+			return
+		}
+		return
+	}
+
+	if typ == CLIENT && !b.CheckConnectAuth(string(msg.ClientIdentifier), string(msg.Username), string(msg.Password)) {
+		connack.ReturnCode = packets.ErrRefusedNotAuthorised
+		err = connack.Write(conn)
+		if err != nil {
+			log.Error("send connack error, ", zap.Error(err), zap.String("clientID", msg.ClientIdentifier))
+			return
+		}
+		return
+	}
+
 	err = connack.Write(conn)
 	if err != nil {
 		log.Error("send connack error, ", zap.Error(err), zap.String("clientID", msg.ClientIdentifier))
 		return
+	}
+
+	if typ == CLIENT {
+		b.Publish(&plugins.Elements{
+			ClientID:  string(msg.ClientIdentifier),
+			Username:  string(msg.Username),
+			Action:    plugins.Connect,
+			Timestamp: time.Now().Unix(),
+		})
 	}
 
 	willmsg := packets.NewControlPacket(packets.Publish).(*packets.PublishPacket)
@@ -396,8 +426,6 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) {
 		}
 		b.routes.Store(cid, c)
 	}
-
-	// mpool := b.messagePool[fnv1a.HashString64(cid)%MessagePoolNum]
 
 	c.readLoop()
 }

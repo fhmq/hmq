@@ -3,13 +3,15 @@
 package broker
 
 import (
-	"crypto/md5"
-	"crypto/rand"
-	"encoding/base64"
-	"encoding/hex"
-	"io"
+	"encoding/json"
 	"reflect"
 	"time"
+
+	"github.com/tidwall/gjson"
+	"go.uber.org/zap"
+
+	"github.com/eclipse/paho.mqtt.golang/packets"
+	uuid "github.com/satori/go.uuid"
 )
 
 const (
@@ -91,13 +93,60 @@ func equal(k1, k2 interface{}) bool {
 	return false
 }
 
-func GenUniqueId() string {
-	b := make([]byte, 48)
-	if _, err := io.ReadFull(rand.Reader, b); err != nil {
-		return ""
+func addSubMap(m map[string]uint64, topic string) {
+	subNum, exist := m[topic]
+	if exist {
+		m[topic] = subNum + 1
+	} else {
+		m[topic] = 1
 	}
-	h := md5.New()
-	h.Write([]byte(base64.URLEncoding.EncodeToString(b)))
-	return hex.EncodeToString(h.Sum(nil))
-	// return GetMd5String()
+}
+
+func delSubMap(m map[string]uint64, topic string) uint64 {
+	subNum, exist := m[topic]
+	if exist {
+		if subNum > 1 {
+			m[topic] = subNum - 1
+			return subNum - 1
+		}
+	} else {
+		m[topic] = 0
+	}
+	return 0
+}
+
+func GenUniqueId() string {
+	return uuid.NewV4().String()
+}
+
+func wrapPublishPacket(packet *packets.PublishPacket) *packets.PublishPacket {
+	p := packet.Copy()
+	wrapPayload := map[string]interface{}{
+		"message_id": GenUniqueId(),
+		"payload":    string(p.Payload),
+	}
+	b, _ := json.Marshal(wrapPayload)
+	p.Payload = b
+	return p
+}
+
+func unWrapPublishPacket(packet *packets.PublishPacket) *packets.PublishPacket {
+	p := packet.Copy()
+	if gjson.GetBytes(p.Payload, "payload").Exists() {
+		p.Payload = []byte(gjson.GetBytes(p.Payload, "payload").String())
+	}
+	return p
+}
+
+func publish(sub *subscription, packet *packets.PublishPacket) {
+	var p *packets.PublishPacket
+	if sub.client.info.username != "root" {
+		p = unWrapPublishPacket(packet)
+	} else {
+		p = wrapPublishPacket(packet)
+	}
+	err := sub.client.WriterPacket(p)
+	if err != nil {
+		log.Error("process message for psub error,  ", zap.Error(err))
+	}
 }

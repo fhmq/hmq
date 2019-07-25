@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mqtt-broker
+spec:
+  selector:
+    matchLabels:
+      app: mqtt-broker
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: mqtt-broker
+    spec:
+      containers:
+        - name: mqtt-broker
+          image: uhub.service.ucloud.cn/uiot_core_hub/hmq:v0.1.0
+          ports:
+            - containerPort: 1883
+            - containerPort: 8080
+          volumeMounts:
+            - name: mqtt-broker1
+              mountPath: /conf
+              subPath: hmq.config
+            - name: mqtt-broker1
+              mountPath: /plugins/kafka/kafka.json
+              subPath: kafka.json
+            - name: mqtt-broker1
+              mountPath: /plugins/authttp/http.json
+              subPath: kafka.json     
+      volumes:
+        - name: mqtt-broker1
+          configMap:
+            name: mqtt-broker1
+            items:
+              - key: hmq.config
+                path: hmq.config
+            items:
+              - key: http.json
+                path: http.json
+            items:
+              - key: kafka.json
+                path: kafka.json
+

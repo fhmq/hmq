@@ -37,7 +37,7 @@ func (p *WorkerPool) Submit(uid string, task func()) {
 
 func (p *WorkerPool) dispatch() {
 	for i := 0; i < p.maxWorkers; i++ {
-		p.taskQueue[i] = make(chan func())
+		p.taskQueue[i] = make(chan func(), 1024)
 		go startWorker(p.taskQueue[i])
 	}
 }
