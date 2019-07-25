@@ -2,6 +2,7 @@ package authhttp
 
 import (
 	"encoding/json"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -88,10 +89,12 @@ func CheckAuth(clientID, username, password string) bool {
 	}
 
 	defer resp.Body.Close()
+	io.Copy(ioutil.Discard, resp.Body)
 	if resp.StatusCode == http.StatusOK {
 		addCache(action, clientID, username, password, "")
 		return true
 	}
+
 	return false
 }
 
@@ -127,6 +130,8 @@ func CheckSuper(clientID, username, password string) bool {
 	}
 
 	defer resp.Body.Close()
+	io.Copy(ioutil.Discard, resp.Body)
+
 	if resp.StatusCode == http.StatusOK {
 		return true
 	}
@@ -165,6 +170,8 @@ func CheckACL(username, access, topic string) bool {
 	}
 
 	defer resp.Body.Close()
+	io.Copy(ioutil.Discard, resp.Body)
+
 	if resp.StatusCode == http.StatusOK {
 		addCache(action, "", username, "", topic)
 		return true
