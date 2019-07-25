@@ -62,6 +62,10 @@ func newMessagePool() []chan *Message {
 }
 
 func NewBroker(config *Config) (*Broker, error) {
+	if config == nil {
+		config = DefaultConfig
+	}
+
 	b := &Broker{
 		id:          GenUniqueId(),
 		config:      config,

@@ -29,28 +29,27 @@ func NewProdLogger() (*zap.Logger, error) {
 	return logCfg.Build()
 }
 
-func InitLogger(debug bool) {
-	var err error
-	var log *zap.Logger
-	if debug {
-		log, err = NewDevLogger()
-	} else {
-		log, err = NewProdLogger()
-	}
-	if err != nil {
-		panic("Unable to create a logger.")
-	}
-	defer log.Sync()
+func Prod() *zap.Logger {
 
-	log.Debug("Logger initialization succeeded")
-	instance = log.Named("hmq")
+	l, _ := NewProdLogger()
+	instance = l
+
+	return instance
 }
 
-// Get return a *zap.Logger instance
+func Debug() *zap.Logger {
+
+	l, _ := NewDevLogger()
+	instance = l
+
+	return instance
+}
+
 func Get() *zap.Logger {
 	if instance == nil {
 		l, _ := NewProdLogger()
-		return l
+		instance = l
 	}
+
 	return instance
 }

@@ -54,7 +54,7 @@ var DefaultConfig *Config = &Config{
 }
 
 var (
-	log *zap.Logger
+	log = logger.Prod().Named("broker")
 )
 
 func showHelp() {
@@ -118,8 +118,9 @@ func ConfigureConfig(args []string) (*Config, error) {
 		}
 	}
 
-	logger.InitLogger(config.Debug)
-	log = logger.Get().Named("Broker")
+	if config.Debug {
+		log = logger.Debug().Named("broker")
+	}
 
 	if err := config.check(); err != nil {
 		return nil, err
