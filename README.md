@@ -83,8 +83,13 @@ Common Options:
 * TLS/SSL Support
 
 * AuthHTTP Support
+	* Auth Connect
+	* Auth ACL
+	* Cache Support
 
 * Kafka Bridge Support
+	* Action Deliver
+	* Regexp Deliver
 
 ### QUEUE SUBSCRIBE
 ~~~

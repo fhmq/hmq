@@ -20,7 +20,12 @@ data:
         "onPublish": "onPublish",
         "onSubscribe": "onSubscribe",
         "onDisconnect": "onDisconnect",
-        "onUnsubscribe": "onUnsubscribe"
+        "onUnsubscribe": "onUnsubscribe",
+        "regexpMap": [
+                {
+                    "^/(.+)/(.+)/upload/(.*)$": "upload"
+                }
+            ]
     }
   
   authhttp.json: |
