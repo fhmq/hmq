@@ -91,6 +91,9 @@ Common Options:
 	* Action Deliver
 	* Regexp Deliver
 
+* HTTP API
+	* Disconnect Connect (future more)
+
 ### QUEUE SUBSCRIBE
 ~~~
 | Prefix              | Examples                                  | Publish                      |

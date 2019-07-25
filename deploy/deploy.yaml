@@ -17,6 +17,7 @@ spec:
           image: uhub.service.ucloud.cn/uiot_core_hub/hmq:v0.1.0
           ports:
             - containerPort: 1883
+            - containerPort: 8080
           volumeMounts:
             - name: mqtt-broker1
               mountPath: /conf
