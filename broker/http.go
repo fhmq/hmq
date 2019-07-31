@@ -22,5 +22,31 @@ func InitHTTPMoniter(b *Broker) {
 		c.JSON(200, &resp)
 	})
 
+	router.GET("api/v1/connections", func(c *gin.Context) {
+		num := 0
+		b.clients.Range(func(key, value interface{}) bool {
+			num++
+			return true
+		})
+		resp := map[string]int{
+			"code":   0,
+			"counts": num,
+		}
+		c.JSON(200, &resp)
+	})
+
+	router.GET("api/v1/nodes", func(c *gin.Context) {
+		num := 0
+		b.clients.Range(func(key, value interface{}) bool {
+			num++
+			return true
+		})
+		resp := map[string]int{
+			"code":   0,
+			"counts": num,
+		}
+		c.JSON(200, &resp)
+	})
+
 	router.Run(":8080")
 }
