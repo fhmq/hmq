@@ -88,19 +88,3 @@ func (b *Broker) checkNodeExist(id, url string) bool {
 	}
 	return false
 }
-
-func (b *Broker) CheckRemoteExist(remoteID, url string) bool {
-	exist := false
-	b.remotes.Range(func(key, value interface{}) bool {
-		v, ok := value.(*client)
-		if ok {
-			if v.route.remoteUrl == url {
-				v.route.remoteID = remoteID
-				exist = true
-				return false
-			}
-		}
-		return true
-	})
-	return exist
-}

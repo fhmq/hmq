@@ -15,7 +15,7 @@ func (c *client) SendInfo() {
 	if c.status == Disconnected {
 		return
 	}
-	url := c.info.localIP + ":" + c.broker.config.Cluster.Port
+	url := c.info.localIP + ":10011"
 
 	infoMsg := NewInfo(c.broker.id, url, false)
 	err := c.WriterPacket(infoMsg)
@@ -102,9 +102,9 @@ func (c *client) ProcessInfo(packet *packets.PublishPacket) {
 
 		url, ok := rurl.(string)
 		if ok {
-			exist := b.CheckRemoteExist(rid, url)
-			if !exist {
-				//todo new rpc client
+			//todo new rpc client
+			if _, exist := b.rpcClient[rid]; !exist {
+				b.initRPCClient(rid, url)
 			}
 		}
 

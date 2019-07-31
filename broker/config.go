@@ -17,26 +17,20 @@ import (
 )
 
 type Config struct {
-	Worker  int       `json:"workerNum"`
-	Host    string    `json:"host"`
-	Port    string    `json:"port"`
-	Cluster RouteInfo `json:"cluster"`
-	Router  string    `json:"router"`
-	TlsHost string    `json:"tlsHost"`
-	TlsPort string    `json:"tlsPort"`
-	WsPath  string    `json:"wsPath"`
-	WsPort  string    `json:"wsPort"`
-	WsTLS   bool      `json:"wsTLS"`
-	TlsInfo TLSInfo   `json:"tlsInfo"`
-	Acl     bool      `json:"acl"`
-	AclConf string    `json:"aclConf"`
-	Debug   bool      `json:"debug"`
-	Plugins []string  `json:"plugins"`
-}
-
-type RouteInfo struct {
-	Host string `json:"host"`
-	Port string `json:"port"`
+	Worker  int      `json:"workerNum"`
+	Host    string   `json:"host"`
+	Port    string   `json:"port"`
+	Router  string   `json:"router"`
+	TlsHost string   `json:"tlsHost"`
+	TlsPort string   `json:"tlsPort"`
+	WsPath  string   `json:"wsPath"`
+	WsPort  string   `json:"wsPort"`
+	WsTLS   bool     `json:"wsTLS"`
+	TlsInfo TLSInfo  `json:"tlsInfo"`
+	Acl     bool     `json:"acl"`
+	AclConf string   `json:"aclConf"`
+	Debug   bool     `json:"debug"`
+	Plugins []string `json:"plugins"`
 }
 
 type TLSInfo struct {
@@ -78,8 +72,6 @@ func ConfigureConfig(args []string) (*Config, error) {
 	fs.StringVar(&config.Port, "port", "1883", "Port to listen on.")
 	fs.StringVar(&config.Port, "p", "1883", "Port to listen on.")
 	fs.StringVar(&config.Host, "host", "0.0.0.0", "Network host to listen on")
-	fs.StringVar(&config.Cluster.Port, "cp", "", "Cluster port from which members can connect.")
-	fs.StringVar(&config.Cluster.Port, "clusterport", "", "Cluster port from which members can connect.")
 	fs.StringVar(&config.Router, "r", "", "Router who maintenance cluster info")
 	fs.StringVar(&config.Router, "router", "", "Router who maintenance cluster info")
 	fs.StringVar(&config.WsPort, "ws", "", "port for ws to listen on")
@@ -158,17 +150,6 @@ func (config *Config) check() error {
 	if config.Port != "" {
 		if config.Host == "" {
 			config.Host = "0.0.0.0"
-		}
-	}
-
-	if config.Cluster.Port != "" {
-		if config.Cluster.Host == "" {
-			config.Cluster.Host = "0.0.0.0"
-		}
-	}
-	if config.Router != "" {
-		if config.Cluster.Port == "" {
-			return errors.New("cluster port is null")
 		}
 	}
 

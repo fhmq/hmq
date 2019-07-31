@@ -14,6 +14,7 @@ import (
 
 	"github.com/fhmq/hmq/broker/lib/sessions"
 	"github.com/fhmq/hmq/broker/lib/topics"
+	pb "github.com/fhmq/hmq/grpc"
 	"github.com/fhmq/hmq/plugins"
 
 	"github.com/eclipse/paho.mqtt.golang/packets"
@@ -42,11 +43,11 @@ type Broker struct {
 	tlsConfig      *tls.Config
 	wpool          *pool.WorkerPool
 	clients        sync.Map
-	remotes        sync.Map
 	nodes          map[string]interface{}
 	clusterPool    chan *Message
 	topicsMgr      *topics.Manager
 	sessionMgr     *sessions.Manager
+	rpcClient      map[string]pb.HMQServiceClient
 	pluginAuthHTTP bool
 	pluginKafka    bool
 }
@@ -130,7 +131,7 @@ func (b *Broker) Start() {
 		return
 	}
 
-	go initRPCService()
+	go b.initRPCService()
 
 	go InitHTTPMoniter(b)
 
@@ -369,6 +370,8 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) {
 			if ok {
 				ol.Close()
 			}
+		} else {
+			b.QueryConnect(cid)
 		}
 		b.clients.Store(cid, c)
 		b.OnlineOfflineNotification(cid, true)
@@ -426,6 +429,7 @@ func (b *Broker) PublishMessage(packet *packets.PublishPacket) {
 		publish(sub, packet)
 	}
 
+	b.DeliverMessage(packet)
 }
 
 func (b *Broker) OnlineOfflineNotification(clientID string, online bool) {
