@@ -14,7 +14,7 @@ import (
 )
 
 func (b *Broker) initRPCService() {
-	lis, err := net.Listen("tcp", ":10011")
+	lis, err := net.Listen("tcp", ":"+b.config.RpcPort)
 	if err != nil {
 		log.Error("failed to listen: ", zap.Error(err))
 		return

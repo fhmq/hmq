@@ -15,7 +15,7 @@ func (c *client) SendInfo() {
 	if c.status == Disconnected {
 		return
 	}
-	url := c.info.localIP + ":10011"
+	url := c.info.localIP + ":" + c.broker.config.RpcPort
 
 	infoMsg := NewInfo(c.broker.id, url, false)
 	err := c.WriterPacket(infoMsg)

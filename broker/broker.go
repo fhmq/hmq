@@ -131,14 +131,13 @@ func (b *Broker) Start() {
 		return
 	}
 
-	go b.initRPCService()
-
 	go InitHTTPMoniter(b)
 
 	//connet to router
 	if b.config.Router != "" {
 		go b.ConnectToDiscovery()
 		go b.processClusterInfo()
+		go b.initRPCService()
 	}
 
 	//listen for websocket

@@ -20,6 +20,7 @@ type Config struct {
 	Worker  int      `json:"workerNum"`
 	Host    string   `json:"host"`
 	Port    string   `json:"port"`
+	RpcPort string   `json:"rpc"`
 	Router  string   `json:"router"`
 	TlsHost string   `json:"tlsHost"`
 	TlsPort string   `json:"tlsPort"`
@@ -72,6 +73,7 @@ func ConfigureConfig(args []string) (*Config, error) {
 	fs.StringVar(&config.Port, "port", "1883", "Port to listen on.")
 	fs.StringVar(&config.Port, "p", "1883", "Port to listen on.")
 	fs.StringVar(&config.Host, "host", "0.0.0.0", "Network host to listen on")
+	fs.StringVar(&config.RpcPort, "rpc", "10011", "Port to listen on.")
 	fs.StringVar(&config.Router, "r", "", "Router who maintenance cluster info")
 	fs.StringVar(&config.Router, "router", "", "Router who maintenance cluster info")
 	fs.StringVar(&config.WsPort, "ws", "", "port for ws to listen on")
