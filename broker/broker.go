@@ -72,6 +72,7 @@ func NewBroker(config *Config) (*Broker, error) {
 		wpool:       pool.New(config.Worker),
 		nodes:       make(map[string]interface{}),
 		clusterPool: make(chan *Message),
+		rpcClient:   make(map[string]pb.HMQServiceClient),
 	}
 
 	var err error
