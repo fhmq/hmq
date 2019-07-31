@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+message QuerySubscribeRequest {
+    string Topic = 1;
+}
+
+message QueryConnectRequest {
+    string ClientID = 1;
+}
+
+message DeliverMessageRequest {
+    string Topic = 1;
+    bytes  Payload = 2;
+}
+
+message Response {
+    int32 RetCode = 2;
+    string Message = 3;
+}
+
+//Service define
+service HMQService {
+    rpc QuerySubscribe(QuerySubscribeRequest) returns  (Response) {}
+    rpc QueryConnect(QueryConnectRequest) returns (Response) {}
+    rpc DeliverMessage(DeliverMessageRequest) returns (Response) {}
+}

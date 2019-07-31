@@ -104,7 +104,7 @@ func (c *client) ProcessInfo(packet *packets.PublishPacket) {
 		if ok {
 			exist := b.CheckRemoteExist(rid, url)
 			if !exist {
-				b.connectRouter(rid, url)
+				//todo new rpc client
 			}
 		}
 
