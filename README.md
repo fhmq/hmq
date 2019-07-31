@@ -92,7 +92,7 @@ Common Options:
 	* Regexp Deliver
 
 * HTTP API
-	* Disconnect Connect (future more)
+	* Disconnect Connect
 
 ### QUEUE SUBSCRIBE
 ~~~
