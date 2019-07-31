@@ -232,7 +232,7 @@ func (c *client) processClientPublish(packet *packets.PublishPacket) {
 
 	switch packet.Qos {
 	case QosAtMostOnce:
-		c.broker.PublishMessage(packet)
+		c.broker.PublishMessage(packet, true)
 	case QosAtLeastOnce:
 		puback := packets.NewControlPacket(packets.Puback).(*packets.PubackPacket)
 		puback.MessageID = packet.MessageID
@@ -240,7 +240,7 @@ func (c *client) processClientPublish(packet *packets.PublishPacket) {
 			log.Error("send puback error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 			return
 		}
-		c.broker.PublishMessage(packet)
+		c.broker.PublishMessage(packet, true)
 	case QosExactlyOnce:
 		return
 	default:
@@ -442,10 +442,9 @@ func (c *client) Close() {
 		if c.typ == CLIENT {
 			//offline notification
 			b.OnlineOfflineNotification(c.info.clientID, false)
-		}
-
-		if c.info.willMsg != nil {
-			b.PublishMessage(c.info.willMsg)
+			if c.info.willMsg != nil {
+				b.PublishMessage(c.info.willMsg, true)
+			}
 		}
 
 		if c.typ == ROUTER {

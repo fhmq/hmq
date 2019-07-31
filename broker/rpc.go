@@ -96,7 +96,7 @@ func (h *HMQ) DeliverMessage(ctx context.Context, in *pb.DeliverMessageRequest) 
 	p.TopicName = in.Topic
 	p.Payload = in.Payload
 	p.Retain = false
-	b.PublishMessage(p)
+	b.PublishMessage(p, false)
 
 	resp := &pb.Response{
 		RetCode: 0,
@@ -104,8 +104,44 @@ func (h *HMQ) DeliverMessage(ctx context.Context, in *pb.DeliverMessageRequest) 
 	return resp, nil
 }
 
+func (h *HMQ) QueryShareSubscribe(ctx context.Context, in *pb.QueryShareSubscribeRequest) (*pb.ShareSubscribeResponse, error) {
+	resp := &pb.ShareSubscribeResponse{
+		RetCode: 0,
+	}
+	topic := in.Topic
+	qos := in.Qos
+	if qos > 1 {
+		resp.RetCode = 404
+		return resp, nil
+	}
+
+	b := h.b
+	var qoss []byte
+	var subs []interface{}
+	err := b.topicsMgr.Subscribers([]byte(topic), byte(qos), &subs, &qoss)
+	if err != nil {
+		log.Error("search sub client error,  ", zap.Error(err))
+		resp.RetCode = 404
+	}
+
+	if len(subs) == 0 {
+		resp.RetCode = 404
+	}
+
+	var qsub int32
+	for _, sub := range subs {
+		s, ok := sub.(*subscription)
+		if ok {
+			if s.share {
+				qsub++
+			}
+		}
+	}
+	resp.ShareSubCount = qsub
+	return resp, nil
+}
+
 func (b *Broker) DeliverMessage(packet *packets.PublishPacket) {
-	//TODO Query and Deliver Message
 	for _, client := range b.rpcClient {
 
 		resp, err := client.QuerySubscribe(context.Background(), &pb.QuerySubscribeRequest{Topic: packet.TopicName, Qos: int32(packet.Qos)})
@@ -122,8 +158,20 @@ func (b *Broker) DeliverMessage(packet *packets.PublishPacket) {
 }
 
 func (b *Broker) QueryConnect(clientID string) {
-	//TODO Query and Deliver Message
 	for _, client := range b.rpcClient {
 		client.QueryConnect(context.Background(), &pb.QueryConnectRequest{ClientID: clientID})
 	}
+}
+
+func (b *Broker) QueryShareSubscribe(topic string, qos byte) map[string]int32 {
+	result := make(map[string]int32)
+	for id, client := range b.rpcClient {
+		resp, err := client.QueryShareSubscribe(context.Background(), &pb.QueryShareSubscribeRequest{Topic: topic, Qos: int32(qos)})
+		if err != nil {
+			log.Error("rpc request error:", zap.Error(err))
+			continue
+		}
+		result[id] = resp.ShareSubCount
+	}
+	return result
 }

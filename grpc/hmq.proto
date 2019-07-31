@@ -15,9 +15,20 @@ message DeliverMessageRequest {
     int32 Qos = 3;
 }
 
+message QueryShareSubscribeRequest {
+    string Topic = 1;
+    int32 Qos = 2;
+}
+
 message Response {
     int32 RetCode = 1;
     string Message = 2;
+}
+
+message ShareSubscribeResponse {
+    int32 RetCode = 1;
+    string Message = 2;
+    int32 ShareSubCount = 3;
 }
 
 //Service define
@@ -25,4 +36,5 @@ service HMQService {
     rpc QuerySubscribe(QuerySubscribeRequest) returns  (Response) {}
     rpc QueryConnect(QueryConnectRequest) returns (Response) {}
     rpc DeliverMessage(DeliverMessageRequest) returns (Response) {}
+    rpc QueryShareSubscribe(QueryShareSubscribeRequest) returns (ShareSubscribeResponse) {}
 }

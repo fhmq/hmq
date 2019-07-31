@@ -387,7 +387,7 @@ func (b *Broker) removeClient(c *client) {
 	b.clients.Delete(clientId)
 }
 
-func (b *Broker) PublishMessage(packet *packets.PublishPacket) {
+func (b *Broker) PublishMessage(packet *packets.PublishPacket, deliver bool) {
 	{
 		//do retain
 		if packet.Retain {
@@ -399,7 +399,9 @@ func (b *Broker) PublishMessage(packet *packets.PublishPacket) {
 
 	{
 		//deliver message to other node
-		go b.DeliverMessage(packet)
+		if deliver {
+			go b.DeliverMessage(packet)
+		}
 	}
 
 	var subs []interface{}
@@ -442,5 +444,5 @@ func (b *Broker) OnlineOfflineNotification(clientID string, online bool) {
 	packet.Qos = 0
 	packet.Payload = []byte(fmt.Sprintf(`{"clientID":"%s","online":%v,"timestamp":"%s"}`, clientID, online, time.Now().UTC().Format(time.RFC3339)))
 
-	b.PublishMessage(packet)
+	b.PublishMessage(packet, true)
 }
