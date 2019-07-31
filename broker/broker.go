@@ -397,6 +397,11 @@ func (b *Broker) PublishMessage(packet *packets.PublishPacket) {
 		}
 	}
 
+	{
+		//deliver message to other node
+		go b.DeliverMessage(packet)
+	}
+
 	var subs []interface{}
 	var qoss []byte
 	err := b.topicsMgr.Subscribers([]byte(packet.TopicName), packet.Qos, &subs, &qoss)
@@ -429,7 +434,6 @@ func (b *Broker) PublishMessage(packet *packets.PublishPacket) {
 		publish(sub, packet)
 	}
 
-	b.DeliverMessage(packet)
 }
 
 func (b *Broker) OnlineOfflineNotification(clientID string, online bool) {
