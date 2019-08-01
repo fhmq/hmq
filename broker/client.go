@@ -44,22 +44,18 @@ var (
 )
 
 type client struct {
-	typ         int
-	mu          sync.Mutex
-	broker      *Broker
-	conn        net.Conn
-	info        info
-	route       route
-	status      int
-	ctx         context.Context
-	cancelFunc  context.CancelFunc
-	session     *sessions.Session
-	subMap      map[string]*subscription
-	topicsMgr   *topics.Manager
-	subs        []interface{}
-	qoss        []byte
-	rmsgs       []*packets.PublishPacket
-	routeSubMap map[string]uint64
+	typ        int
+	mu         sync.Mutex
+	broker     *Broker
+	conn       net.Conn
+	info       info
+	status     int
+	ctx        context.Context
+	cancelFunc context.CancelFunc
+	session    *sessions.Session
+	subMap     map[string]*subscription
+	topicsMgr  *topics.Manager
+	rmsgs      []*packets.PublishPacket
 }
 
 type subscription struct {
