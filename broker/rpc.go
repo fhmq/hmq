@@ -171,7 +171,10 @@ func (b *Broker) QueryShareSubscribe(topic string, qos byte) map[string]int32 {
 			log.Error("rpc request error:", zap.Error(err))
 			continue
 		}
-		result[id] = resp.ShareSubCount
+		if resp.ShareSubCount > 0 {
+			result[id] = resp.ShareSubCount
+		}
+
 	}
 	return result
 }
