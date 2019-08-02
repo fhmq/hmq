@@ -5,7 +5,6 @@ package broker
 import (
 	"context"
 	"errors"
-	"math/rand"
 	"net"
 	"reflect"
 	"regexp"
@@ -83,7 +82,6 @@ type route struct {
 
 var (
 	DisconnectdPacket = packets.NewControlPacket(packets.Disconnect).(*packets.DisconnectPacket)
-	r                 = rand.New(rand.NewSource(time.Now().UnixNano()))
 )
 
 func (c *client) init() {
@@ -185,30 +183,11 @@ func (c *client) ProcessPublish(packet *packets.PublishPacket) {
 	switch c.typ {
 	case CLIENT:
 		c.processClientPublish(packet)
-	case ROUTER:
-		c.processRemotePublish(packet)
-	}
-
-}
-
-func (c *client) processRemotePublish(packet *packets.PublishPacket) {
-	if c.status == Disconnected {
-		return
-	}
-
-	topic := packet.TopicName
-	if topic == BrokerInfoTopic {
-		c.ProcessInfo(packet)
-		return
 	}
 
 }
 
 func (c *client) processClientPublish(packet *packets.PublishPacket) {
-	if c.status == Disconnected {
-		return
-	}
-
 	topic := packet.TopicName
 
 	if !c.broker.CheckTopicAuth(PUB, c.info.username, topic) {
@@ -441,10 +420,6 @@ func (c *client) Close() {
 			if c.info.willMsg != nil {
 				b.PublishMessage(c.info.willMsg, true)
 			}
-		}
-
-		if c.typ == ROUTER {
-			b.ConnectToDiscovery()
 		}
 	}
 }

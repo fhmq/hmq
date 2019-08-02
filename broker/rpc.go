@@ -26,18 +26,45 @@ func (b *Broker) initRPCService() {
 	pb.RegisterHMQServiceServer(s, &HMQ{b: b})
 	reflection.Register(s)
 	if err := s.Serve(lis); err != nil {
-		log.Error("failed to serve: ", zap.Error(err))
+		log.Error("failed to server: ", zap.Error(err))
 	}
 }
 
 func (b *Broker) initRPCClient(id, url string) {
+
 	conn, err := grpc.Dial(url,
 		grpc.WithInsecure(),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time: 30 * time.Minute,
 		}))
-	if err != nil {
+	var tempDelay time.Duration = 0
+	var maxRetry int = 0
+	for err != nil {
+		//max retry
+		if maxRetry > 100 {
+			b.DeleteNode(id)
+			return
+		}
+
 		log.Error("create connect rpc service failed", zap.String("url", url), zap.Error(err))
+		if 0 == tempDelay {
+			tempDelay = 1 * time.Second
+		} else {
+			tempDelay *= 2
+		}
+
+		if max := 20 * time.Second; tempDelay > max {
+			tempDelay = max
+		}
+		time.Sleep(tempDelay)
+		log.Debug("connect to rpc timeout, retry...")
+		maxRetry++
+
+		conn, err = grpc.Dial(url,
+			grpc.WithInsecure(),
+			grpc.WithKeepaliveParams(keepalive.ClientParameters{
+				Time: 30 * time.Minute,
+			}))
 	}
 
 	cli := pb.NewHMQServiceClient(conn)

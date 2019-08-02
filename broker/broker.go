@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"go.etcd.io/etcd/clientv3"
+
 	"github.com/fhmq/hmq/broker/lib/sessions"
 	"github.com/fhmq/hmq/broker/lib/topics"
 	pb "github.com/fhmq/hmq/grpc"
@@ -40,6 +42,7 @@ type Broker struct {
 	id             string
 	mu             sync.Mutex
 	config         *Config
+	etcdClient     *clientv3.Client
 	tlsConfig      *tls.Config
 	wpool          *pool.WorkerPool
 	clients        sync.Map
@@ -116,9 +119,7 @@ func (b *Broker) SubmitWork(clientId string, msg *Message) {
 		b.wpool = pool.New(b.config.Worker)
 	}
 
-	if msg.client.typ == ROUTER {
-		b.clusterPool <- msg
-	} else {
+	if msg.client.typ == CLIENT {
 		b.wpool.Submit(clientId, func() {
 			ProcessMessage(msg)
 		})
@@ -135,9 +136,8 @@ func (b *Broker) Start() {
 	go InitHTTPMoniter(b)
 
 	//connet to router
-	if b.config.Router != "" {
-		go b.ConnectToDiscovery()
-		go b.processClusterInfo()
+	if b.config.Etcd != "" {
+		go b.ConnectToEtcd()
 		go b.initRPCService()
 	}
 

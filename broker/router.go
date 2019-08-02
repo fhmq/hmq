@@ -1,90 +1,94 @@
 package broker
 
 import (
-	"net"
+	"context"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
+
+	"go.etcd.io/etcd/clientv3"
 )
 
-func (b *Broker) processClusterInfo() {
-	for {
-		msg, ok := <-b.clusterPool
-		if !ok {
-			log.Error("read message from cluster channel error")
-			return
-		}
-		ProcessMessage(msg)
+func (b *Broker) ConnectToEtcd() {
+	cli, err := clientv3.New(clientv3.Config{
+		Endpoints:   []string{"http://106.75.231.3:2379"},
+		DialTimeout: time.Second * 5,
+	})
+	if err != nil {
+		panic(err)
 	}
+	b.etcdClient = cli
+	b.GetNode()
 
+	rch := cli.Watch(context.Background(), "root/node/", clientv3.WithPrefix())
+	for wresp := range rch {
+		for _, ev := range wresp.Events {
+			switch ev.Type {
+			case clientv3.EventTypePut:
+				keys := strings.Split(string(ev.Kv.Key), "/")
+				nodeID := keys[len(keys)-1]
+				nodeURL := string(ev.Kv.Value)
+				log.Debug("new node join: ", zap.String("nodeID", nodeID), zap.String("nodeIP", nodeURL))
+				b.AddNode(nodeID, nodeURL)
+			case clientv3.EventTypeDelete:
+				keys := strings.Split(string(ev.Kv.Key), "/")
+				nodeID := keys[len(keys)-1]
+				log.Debug("node left: ", zap.String("nodeID", nodeID))
+				b.DeleteNode(nodeID)
+			default:
+				continue
+			}
+		}
+	}
 }
 
-func (b *Broker) ConnectToDiscovery() {
-	var conn net.Conn
-	var err error
-	var tempDelay time.Duration = 0
-	for {
-		conn, err = net.Dial("tcp", b.config.Router)
-		if err != nil {
-			log.Error("Error trying to connect to route: ", zap.Error(err))
-			log.Debug("Connect to route timeout ,retry...")
-
-			if 0 == tempDelay {
-				tempDelay = 1 * time.Second
-			} else {
-				tempDelay *= 2
-			}
-
-			if max := 20 * time.Second; tempDelay > max {
-				tempDelay = max
-			}
-			time.Sleep(tempDelay)
-			continue
-		}
-		break
+func (b *Broker) GetNode() {
+	resp, err := b.etcdClient.Get(context.Background(),
+		"root/node/", clientv3.WithPrefix())
+	if err != nil {
+		log.Error("get nodes from etcd error", zap.Error(err))
 	}
-	log.Debug("connect to router success :", zap.String("Router", b.config.Router))
-
-	cid := b.id
-	info := info{
-		clientID:  cid,
-		keepalive: 60,
+	for _, kv := range resp.Kvs {
+		keys := strings.Split(string(kv.Key), "/")
+		nodeID := keys[len(keys)-1]
+		nodeURL := string(kv.Value)
+		b.AddNode(nodeID, nodeURL)
 	}
-
-	c := &client{
-		typ:    ROUTER,
-		broker: b,
-		conn:   conn,
-		info:   info,
-	}
-
-	c.init()
-
-	c.SendConnect()
-	c.SendInfo()
-
-	go c.readLoop()
-	go c.StartPing()
 }
 
-func (b *Broker) checkNodeExist(id, url string) bool {
+func (b *Broker) CloseSelf() {
+	_, err := b.etcdClient.Delete(context.Background(),
+		"root/node/"+b.id)
+	if err != nil {
+		log.Error("delete self from etcd error", zap.Error(err))
+	}
+}
+
+func (b *Broker) PutSelf() {
+	b.etcdClient.Txn()
+	_, err := b.etcdClient.Put(context.Background(),
+		"root/node/"+b.id, b.config.RpcPort)
+	if err != nil {
+		log.Error("delete self from etcd error", zap.Error(err))
+	}
+}
+
+func (b *Broker) AddNode(id, url string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	if id == b.id {
-		return false
+		return
 	}
-
-	for k, v := range b.nodes {
-		if k == id {
-			return true
-		}
-
-		//skip
-		l, ok := v.(string)
-		if ok {
-			if url == l {
-				return true
-			}
-		}
-
+	_, exist := b.nodes[id]
+	if !exist {
+		b.nodes[id] = url
+		go b.initRPCClient(id, url)
 	}
-	return false
+}
+
+func (b *Broker) DeleteNode(id string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.nodes, id)
 }
