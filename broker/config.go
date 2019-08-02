@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"strconv"
 
 	"github.com/fhmq/hmq/logger"
 	"go.uber.org/zap"
@@ -73,7 +74,6 @@ func ConfigureConfig(args []string) (*Config, error) {
 	fs.StringVar(&config.Port, "port", "1883", "Port to listen on.")
 	fs.StringVar(&config.Port, "p", "1883", "Port to listen on.")
 	fs.StringVar(&config.Host, "host", "0.0.0.0", "Network host to listen on")
-	fs.StringVar(&config.RpcPort, "rpc", "10011", "Port to listen on.")
 	fs.StringVar(&config.Router, "r", "", "Router who maintenance cluster info")
 	fs.StringVar(&config.Router, "router", "", "Router who maintenance cluster info")
 	fs.StringVar(&config.WsPort, "ws", "", "port for ws to listen on")
@@ -164,6 +164,11 @@ func (config *Config) check() error {
 			config.TlsHost = "0.0.0.0"
 		}
 	}
+
+	if config.Router != "" {
+		config.RpcPort = strconv.Itoa(randInt())
+	}
+
 	return nil
 }
 
@@ -204,4 +209,8 @@ func NewTLSConfig(tlsInfo TLSInfo) (*tls.Config, error) {
 	}
 
 	return &config, nil
+}
+
+func randInt() int {
+	return r.Intn(1000) + 10000
 }

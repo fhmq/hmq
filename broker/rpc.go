@@ -48,8 +48,8 @@ type HMQ struct {
 	b *Broker
 }
 
-func (h *HMQ) QuerySubscribe(ctx context.Context, in *pb.QuerySubscribeRequest) (*pb.Response, error) {
-	resp := &pb.Response{
+func (h *HMQ) QuerySubscribe(ctx context.Context, in *pb.QuerySubscribeRequest) (*pb.SubscribeResponse, error) {
+	resp := &pb.SubscribeResponse{
 		RetCode: 0,
 	}
 	topic := in.Topic
@@ -71,6 +71,18 @@ func (h *HMQ) QuerySubscribe(ctx context.Context, in *pb.QuerySubscribeRequest) 
 	if len(subs) == 0 {
 		resp.RetCode = 404
 	}
+	resp.SubCount = int32(len(subs))
+
+	var qsub int32
+	for _, sub := range subs {
+		s, ok := sub.(*subscription)
+		if ok {
+			if s.share {
+				qsub++
+			}
+		}
+	}
+	resp.ShareSubCount = qsub
 
 	return resp, nil
 }
@@ -96,7 +108,7 @@ func (h *HMQ) DeliverMessage(ctx context.Context, in *pb.DeliverMessageRequest) 
 	p.TopicName = in.Topic
 	p.Payload = in.Payload
 	p.Retain = false
-	b.PublishMessage(p, false)
+	b.PublishDeliverdMessage(p, in.Share)
 
 	resp := &pb.Response{
 		RetCode: 0,
@@ -104,57 +116,8 @@ func (h *HMQ) DeliverMessage(ctx context.Context, in *pb.DeliverMessageRequest) 
 	return resp, nil
 }
 
-func (h *HMQ) QueryShareSubscribe(ctx context.Context, in *pb.QueryShareSubscribeRequest) (*pb.ShareSubscribeResponse, error) {
-	resp := &pb.ShareSubscribeResponse{
-		RetCode: 0,
-	}
-	topic := in.Topic
-	qos := in.Qos
-	if qos > 1 {
-		resp.RetCode = 404
-		return resp, nil
-	}
+func (b *Broker) DeliverMessage(packet *packets.PublishPacket, shareRemoteID string) {
 
-	b := h.b
-	var qoss []byte
-	var subs []interface{}
-	err := b.topicsMgr.Subscribers([]byte(topic), byte(qos), &subs, &qoss)
-	if err != nil {
-		log.Error("search sub client error,  ", zap.Error(err))
-		resp.RetCode = 404
-	}
-
-	if len(subs) == 0 {
-		resp.RetCode = 404
-	}
-
-	var qsub int32
-	for _, sub := range subs {
-		s, ok := sub.(*subscription)
-		if ok {
-			if s.share {
-				qsub++
-			}
-		}
-	}
-	resp.ShareSubCount = qsub
-	return resp, nil
-}
-
-func (b *Broker) DeliverMessage(packet *packets.PublishPacket) {
-	for _, client := range b.rpcClient {
-
-		resp, err := client.QuerySubscribe(context.Background(), &pb.QuerySubscribeRequest{Topic: packet.TopicName, Qos: int32(packet.Qos)})
-		if err != nil {
-			log.Error("rpc request error:", zap.Error(err))
-			continue
-		}
-
-		if resp.RetCode == 0 {
-			client.DeliverMessage(context.Background(), &pb.DeliverMessageRequest{Topic: packet.TopicName, Payload: packet.Payload})
-		}
-
-	}
 }
 
 func (b *Broker) QueryConnect(clientID string) {
@@ -163,18 +126,20 @@ func (b *Broker) QueryConnect(clientID string) {
 	}
 }
 
-func (b *Broker) QueryShareSubscribe(topic string, qos byte) map[string]int32 {
-	result := make(map[string]int32)
+type remoteSubInfo struct {
+	subCount      int
+	shareSubCount int
+}
+
+func (b *Broker) QuerySubscribe(topic string, qos byte) map[string]remoteSubInfo {
+	result := make(map[string]remoteSubInfo)
 	for id, client := range b.rpcClient {
-		resp, err := client.QueryShareSubscribe(context.Background(), &pb.QueryShareSubscribeRequest{Topic: topic, Qos: int32(qos)})
+		resp, err := client.QuerySubscribe(context.Background(), &pb.QuerySubscribeRequest{Topic: topic, Qos: int32(qos)})
 		if err != nil {
 			log.Error("rpc request error:", zap.Error(err))
 			continue
 		}
-		if resp.ShareSubCount > 0 {
-			result[id] = resp.ShareSubCount
-		}
-
+		result[id] = remoteSubInfo{subCount: int(resp.SubCount), shareSubCount: int(resp.ShareSubCount)}
 	}
 	return result
 }

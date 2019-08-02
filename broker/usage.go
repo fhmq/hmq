@@ -17,7 +17,6 @@ Logging Options:
 
 Cluster Options:
     -r,  --router  <rurl>             Router who maintenance cluster info
-    -rpc,  <rpc-port> Cluster listen port for others
 
 Common Options:
     -h, --help                        Show this message

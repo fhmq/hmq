@@ -3,6 +3,7 @@
 package broker
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"net"
@@ -387,20 +388,22 @@ func (b *Broker) removeClient(c *client) {
 	b.clients.Delete(clientId)
 }
 
-func (b *Broker) PublishMessage(packet *packets.PublishPacket, deliver bool) {
+func (b *Broker) OnlineOfflineNotification(clientID string, online bool) {
+	packet := packets.NewControlPacket(packets.Publish).(*packets.PublishPacket)
+	packet.TopicName = "$SYS/broker/connection/clients/" + clientID
+	packet.Qos = 0
+	packet.Payload = []byte(fmt.Sprintf(`{"clientID":"%s","online":%v,"timestamp":"%s"}`, clientID, online, time.Now().UTC().Format(time.RFC3339)))
+
+	b.PublishMessage(packet)
+}
+
+func (b *Broker) PublishDeliverdMessage(packet *packets.PublishPacket, share bool) {
 	{
 		//do retain
 		if packet.Retain {
 			if err := b.topicsMgr.Retain(packet); err != nil {
 				log.Error("Error retaining message: ", zap.Error(err))
 			}
-		}
-	}
-
-	{
-		//deliver message to other node
-		if deliver {
-			go b.DeliverMessage(packet)
 		}
 	}
 
@@ -416,33 +419,97 @@ func (b *Broker) PublishMessage(packet *packets.PublishPacket, deliver bool) {
 		return
 	}
 
-	var qsub []int
-	for i, sub := range subs {
+	var qsub []*subscription
+	for _, sub := range subs {
 		s, ok := sub.(*subscription)
 		if ok {
 			if s.share {
-				qsub = append(qsub, i)
+				qsub = append(qsub, s)
 			} else {
 				publish(s, packet)
 			}
-
 		}
-
 	}
 
-	if len(qsub) > 0 {
-		idx := r.Intn(len(qsub))
-		sub := subs[qsub[idx]].(*subscription)
+	if share {
+		target := r.Intn(len(qsub))
+		sub := qsub[target]
 		publish(sub, packet)
 	}
+}
+
+func (b *Broker) PublishMessage(packet *packets.PublishPacket) {
+	{
+		//do retain
+		if packet.Retain {
+			if err := b.topicsMgr.Retain(packet); err != nil {
+				log.Error("Error retaining message: ", zap.Error(err))
+			}
+		}
+	}
+
+	var subs []interface{}
+	var qoss []byte
+	err := b.topicsMgr.Subscribers([]byte(packet.TopicName), packet.Qos, &subs, &qoss)
+	if err != nil {
+		log.Error("search sub client error,  ", zap.Error(err))
+		return
+	}
+
+	if len(subs) == 0 {
+		return
+	}
+
+	var qsub []*subscription
+	for _, sub := range subs {
+		s, ok := sub.(*subscription)
+		if ok {
+			if s.share {
+				qsub = append(qsub, s)
+			} else {
+				publish(s, packet)
+			}
+		}
+	}
+
+	b.ProcessRemote(packet, qsub)
 
 }
 
-func (b *Broker) OnlineOfflineNotification(clientID string, online bool) {
-	packet := packets.NewControlPacket(packets.Publish).(*packets.PublishPacket)
-	packet.TopicName = "$SYS/broker/connection/clients/" + clientID
-	packet.Qos = 0
-	packet.Payload = []byte(fmt.Sprintf(`{"clientID":"%s","online":%v,"timestamp":"%s"}`, clientID, online, time.Now().UTC().Format(time.RFC3339)))
+func (b *Broker) ProcessRemote(packet *packets.PublishPacket, loaclShareSub []*subscription) {
+	shareRemoteID := ""
+	remoteSubInfo := b.QuerySubscribe(packet.TopicName, packet.Qos)
+	totalShare := len(loaclShareSub)
+	for _, v := range remoteSubInfo {
+		totalShare = totalShare + v.shareSubCount
+	}
+	target := r.Intn(totalShare)
 
-	b.PublishMessage(packet, true)
+	if target < len(loaclShareSub) {
+		shareRemoteID = b.id
+	} else {
+		target = target - len(loaclShareSub)
+		for k, v := range remoteSubInfo {
+			if target < v.shareSubCount {
+				shareRemoteID = k
+				return
+			}
+			target = target - v.shareSubCount
+		}
+	}
+
+	//send remote
+	for id, sub := range remoteSubInfo {
+		rpcCli := b.rpcClient[id]
+		if sub.subCount > 0 {
+			rpcCli.DeliverMessage(context.Background(), &pb.DeliverMessageRequest{Topic: packet.TopicName, Payload: packet.Payload, Share: shareRemoteID == id})
+		}
+	}
+
+	//send local
+	if shareRemoteID == b.id {
+		sub := loaclShareSub[target]
+		publish(sub, packet)
+	}
+
 }
