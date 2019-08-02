@@ -94,7 +94,7 @@ Common Options:
 * HTTP API
 	* Disconnect Connect (future more)
 
-### QUEUE SUBSCRIBE
+### Share SUBSCRIBE
 ~~~
 | Prefix              | Examples                                  | Publish                      |
 | ------------------- |-------------------------------------------|--------------------------- --|
