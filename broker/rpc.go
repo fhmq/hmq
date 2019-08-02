@@ -37,7 +37,6 @@ func (b *Broker) initRPCClient(id, url string) {
 			Time: 30 * time.Minute,
 		}))
 	var tempDelay time.Duration = 0
-	var maxRetry int = 0
 	for err != nil {
 		if !b.checkNodeExist(id, url) {
 			return
@@ -47,7 +46,7 @@ func (b *Broker) initRPCClient(id, url string) {
 		if 0 == tempDelay {
 			tempDelay = 1 * time.Second
 		} else {
-			tempDelay *= 2
+			tempDelay += 1
 		}
 
 		if max := 20 * time.Second; tempDelay > max {
@@ -55,7 +54,6 @@ func (b *Broker) initRPCClient(id, url string) {
 		}
 		time.Sleep(tempDelay)
 		log.Debug("connect to rpc timeout, retry...")
-		maxRetry++
 
 		conn, err = grpc.Dial(url,
 			grpc.WithInsecure(),
