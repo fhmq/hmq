@@ -138,10 +138,6 @@ func (h *HMQ) DeliverMessage(ctx context.Context, in *pb.DeliverMessageRequest) 
 	return resp, nil
 }
 
-func (b *Broker) DeliverMessage(packet *packets.PublishPacket, shareRemoteID string) {
-
-}
-
 func (b *Broker) QueryConnect(clientID string) {
 	for _, client := range b.rpcClient {
 		client.QueryConnect(context.Background(), &pb.QueryConnectRequest{ClientID: clientID})
