@@ -32,7 +32,6 @@ Logging Options:
 
 Cluster Options:
     -r,  --router  <rurl>             Router who maintenance cluster info
-    -cp, --clusterport <cluster-port> Cluster listen port for others
 
 Common Options:
     -h, --help                        Show this message
@@ -44,10 +43,6 @@ Common Options:
 	"workerNum": 4096,
 	"port": "1883",
 	"host": "0.0.0.0",
-	"cluster": {
-		"host": "0.0.0.0",
-		"port": "1993"
-	},
 	"router": "127.0.0.1:9888",
 	"wsPort": "1888",
 	"wsPath": "/ws",
