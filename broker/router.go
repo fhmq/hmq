@@ -69,7 +69,7 @@ func (b *Broker) ConnectToDiscovery() {
 
 func (b *Broker) checkNodeExist(id, url string) bool {
 	if id == b.id {
-		return false
+		return false //skip self
 	}
 
 	for k, v := range b.nodes {
@@ -77,9 +77,8 @@ func (b *Broker) checkNodeExist(id, url string) bool {
 			return true
 		}
 
-		//skip
-		l, ok := v.(string)
-		if ok {
+		l := v.String()
+		if l != "" {
 			if url == l {
 				return true
 			}

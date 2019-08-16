@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	simplejson "github.com/bitly/go-simplejson"
+	"github.com/tidwall/gjson"
+
 	"github.com/eclipse/paho.mqtt.golang/packets"
 	"go.uber.org/zap"
 )
@@ -80,15 +81,9 @@ func (c *client) ProcessInfo(packet *packets.PublishPacket) {
 
 	log.Info("recv remoteInfo: ", zap.String("payload", string(packet.Payload)))
 
-	js, err := simplejson.NewJson(packet.Payload)
-	if err != nil {
-		log.Warn("parse info message err", zap.Error(err))
-		return
-	}
-
-	routes, err := js.Get("data").Map()
-	if routes == nil {
-		log.Error("receive info message error, ", zap.Error(err))
+	routes := gjson.GetBytes(packet.Payload, "data").Map()
+	if len(routes) == 0 {
+		log.Error("receive nil info message ", zap.String("info", string(packet.Payload)))
 		return
 	}
 
@@ -100,9 +95,8 @@ func (c *client) ProcessInfo(packet *packets.PublishPacket) {
 			continue
 		}
 
-		url, ok := rurl.(string)
-		if ok {
-			//todo new rpc client
+		url := rurl.String()
+		if url != "" {
 			if _, exist := b.rpcClient[rid]; !exist {
 				b.initRPCClient(rid, url)
 			}

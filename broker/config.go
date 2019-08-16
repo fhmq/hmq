@@ -18,21 +18,26 @@ import (
 )
 
 type Config struct {
-	Worker  int      `json:"workerNum"`
-	Host    string   `json:"host"`
-	Port    string   `json:"port"`
-	RpcPort string   `json:"rpc"`
-	Router  string   `json:"router"`
-	TlsHost string   `json:"tlsHost"`
-	TlsPort string   `json:"tlsPort"`
-	WsPath  string   `json:"wsPath"`
-	WsPort  string   `json:"wsPort"`
-	WsTLS   bool     `json:"wsTLS"`
-	TlsInfo TLSInfo  `json:"tlsInfo"`
-	Acl     bool     `json:"acl"`
-	AclConf string   `json:"aclConf"`
-	Debug   bool     `json:"debug"`
-	Plugins []string `json:"plugins"`
+	Worker  int     `json:"workerNum"`
+	Host    string  `json:"host"`
+	Port    string  `json:"port"`
+	RpcPort string  `json:"rpc"`
+	Router  string  `json:"router"`
+	TlsHost string  `json:"tlsHost"`
+	TlsPort string  `json:"tlsPort"`
+	WsPath  string  `json:"wsPath"`
+	WsPort  string  `json:"wsPort"`
+	WsTLS   bool    `json:"wsTLS"`
+	TlsInfo TLSInfo `json:"tlsInfo"`
+	Acl     bool    `json:"acl"`
+	AclConf string  `json:"aclConf"`
+	Debug   bool    `json:"debug"`
+	Plugin  Plugins `json:"plugins"`
+}
+
+type Plugins struct {
+	Auth   string
+	Bridge string
 }
 
 type TLSInfo struct {

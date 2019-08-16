@@ -55,9 +55,10 @@ Common Options:
 		"certFile": "tls/server/cert.pem",
 		"keyFile": "tls/server/key.pem"
 	},
-	"acl":true,
-	"aclConf":"conf/acl.conf",
-	"plugins": ["authhttp","kafka"]
+	"plugins": {
+		"auth": "authhttp",
+		"bridge": "kafka"
+	}
 }
 ~~~
 

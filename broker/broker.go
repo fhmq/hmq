@@ -13,14 +13,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tidwall/gjson"
+
+	"github.com/fhmq/hmq/plugins/auth"
+	"github.com/fhmq/hmq/plugins/bridge"
+
 	"github.com/fhmq/hmq/broker/lib/sessions"
 	"github.com/fhmq/hmq/broker/lib/topics"
 	pb "github.com/fhmq/hmq/grpc"
-	"github.com/fhmq/hmq/plugins"
 
 	"github.com/eclipse/paho.mqtt.golang/packets"
-	"github.com/fhmq/hmq/plugins/authhttp"
-	"github.com/fhmq/hmq/plugins/kafka"
 	"github.com/fhmq/hmq/pool"
 	"github.com/shirou/gopsutil/mem"
 	"go.uber.org/zap"
@@ -38,19 +40,19 @@ type Message struct {
 }
 
 type Broker struct {
-	id             string
-	mu             sync.Mutex
-	config         *Config
-	tlsConfig      *tls.Config
-	wpool          *pool.WorkerPool
-	clients        sync.Map
-	nodes          map[string]interface{}
-	clusterPool    chan *Message
-	topicsMgr      *topics.Manager
-	sessionMgr     *sessions.Manager
-	rpcClient      map[string]pb.HMQServiceClient
-	pluginAuthHTTP bool
-	pluginKafka    bool
+	id          string
+	mu          sync.Mutex
+	config      *Config
+	tlsConfig   *tls.Config
+	wpool       *pool.WorkerPool
+	clients     sync.Map
+	nodes       map[string]gjson.Result
+	clusterPool chan *Message
+	topicsMgr   *topics.Manager
+	sessionMgr  *sessions.Manager
+	rpcClient   map[string]pb.HMQServiceClient
+	Auth        auth.Auth
+	BridgeMQ    bridge.BridgeMQ
 }
 
 func newMessagePool() []chan *Message {
@@ -71,7 +73,7 @@ func NewBroker(config *Config) (*Broker, error) {
 		id:          GenUniqueId(),
 		config:      config,
 		wpool:       pool.New(config.Worker),
-		nodes:       make(map[string]interface{}),
+		nodes:       make(map[string]gjson.Result),
 		clusterPool: make(chan *Message),
 		rpcClient:   make(map[string]pb.HMQServiceClient),
 	}
@@ -98,16 +100,8 @@ func NewBroker(config *Config) (*Broker, error) {
 		b.tlsConfig = tlsconfig
 	}
 
-	for _, plugin := range b.config.Plugins {
-		switch plugin {
-		case authhttp.AuthHTTP:
-			authhttp.Init()
-			b.pluginAuthHTTP = true
-		case kafka.Kafka:
-			kafka.Init()
-			b.pluginKafka = true
-		}
-	}
+	b.Auth = auth.NewAuth(b.config.Plugin.Auth)
+	b.BridgeMQ = bridge.NewBridgeMQ(b.config.Plugin.Bridge)
 
 	return b, nil
 }
@@ -316,10 +310,10 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) {
 	}
 
 	if typ == CLIENT {
-		b.Publish(&plugins.Elements{
+		b.Publish(&bridge.Elements{
 			ClientID:  string(msg.ClientIdentifier),
 			Username:  string(msg.Username),
-			Action:    plugins.Connect,
+			Action:    bridge.Connect,
 			Timestamp: time.Now().Unix(),
 		})
 	}

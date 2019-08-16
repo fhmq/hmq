@@ -15,8 +15,8 @@
 		"certFile": "ssl/server/cert.pem",
 		"keyFile": "ssl/server/key.pem"
 	},
-	"plugins": [
-		"authhttp",
-		"kafka"
-	]
+	"plugins": {
+		"auth": "authhttp",
+		"bridge": "kafka"
+	}
 }
