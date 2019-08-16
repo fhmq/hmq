@@ -1,4 +1,6 @@
-package plugins
+package bridge
+
+import "github.com/fhmq/rhmq/logger"
 
 const (
 	//Connect mqtt connect
@@ -13,6 +15,10 @@ const (
 	Disconnect = "disconnect"
 )
 
+var (
+	log = logger.Get().Named("bridge")
+)
+
 //Elements kafka publish elements
 type Elements struct {
 	ClientID  string `json:"clientid"`
@@ -22,4 +28,22 @@ type Elements struct {
 	Timestamp int64  `json:"ts"`
 	Size      int32  `json:"size"`
 	Action    string `json:"action"`
+}
+
+const (
+	//Kafka plugin name
+	Kafka = "kafka"
+)
+
+type BridgeMQ interface {
+	Publish(e *Elements) error
+}
+
+func NewBridgeMQ(name string) BridgeMQ {
+	switch name {
+	case Kafka:
+		return InitKafka()
+	default:
+		return &mockMQ{}
+	}
 }

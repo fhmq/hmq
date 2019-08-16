@@ -10,19 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fhmq/hmq/logger"
+	"github.com/fhmq/rhmq/logger"
 	"go.uber.org/zap"
-)
-
-const (
-	//AuthHTTP plugin name
-	AuthHTTP = "authhttp"
-)
-
-var (
-	config     Config
-	log        = logger.Get().Named("http")
-	httpClient *http.Client
 )
 
 //Config device kafka config
@@ -32,9 +21,19 @@ type Config struct {
 	SuperURL string `json:"super"`
 }
 
+type authHTTP struct {
+	client *http.Client
+}
+
+var (
+	config     Config
+	log        = logger.Get().Named("authhttp")
+	httpClient *http.Client
+)
+
 //Init init kafak client
-func Init() {
-	content, err := ioutil.ReadFile("./plugins/authhttp/http.json")
+func Init() *authHTTP {
+	content, err := ioutil.ReadFile("./plugins/auth/authhttp/http.json")
 	if err != nil {
 		log.Fatal("Read config file error: ", zap.Error(err))
 	}
@@ -54,11 +53,11 @@ func Init() {
 		},
 		Timeout: time.Second * 100,
 	}
-
+	return &authHTTP{client: httpClient}
 }
 
 //CheckAuth check mqtt connect
-func CheckAuth(clientID, username, password string) bool {
+func (a *authHTTP) CheckConnect(clientID, username, password string) bool {
 	action := "connect"
 	{
 		aCache := checkCache(action, clientID, username, password, "")
@@ -82,7 +81,7 @@ func CheckAuth(clientID, username, password string) bool {
 	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Add("Content-Length", strconv.Itoa(len(data.Encode())))
 
-	resp, err := httpClient.Do(req)
+	resp, err := a.client.Do(req)
 	if err != nil {
 		log.Error("request super: ", zap.Error(err))
 		return false
@@ -98,48 +97,48 @@ func CheckAuth(clientID, username, password string) bool {
 	return false
 }
 
-//CheckSuper check mqtt connect
-func CheckSuper(clientID, username, password string) bool {
-	action := "connect"
-	{
-		aCache := checkCache(action, clientID, username, password, "")
-		if aCache != nil {
-			if aCache.password == password && aCache.username == username && aCache.action == action {
-				return true
-			}
-		}
-	}
+// //CheckSuper check mqtt connect
+// func CheckSuper(clientID, username, password string) bool {
+// 	action := "connect"
+// 	{
+// 		aCache := checkCache(action, clientID, username, password, "")
+// 		if aCache != nil {
+// 			if aCache.password == password && aCache.username == username && aCache.action == action {
+// 				return true
+// 			}
+// 		}
+// 	}
 
-	data := url.Values{}
-	data.Add("username", username)
-	data.Add("clientid", clientID)
-	data.Add("password", password)
+// 	data := url.Values{}
+// 	data.Add("username", username)
+// 	data.Add("clientid", clientID)
+// 	data.Add("password", password)
 
-	req, err := http.NewRequest("POST", config.SuperURL, strings.NewReader(data.Encode()))
-	if err != nil {
-		log.Error("new request super: ", zap.Error(err))
-		return false
-	}
-	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Add("Content-Length", strconv.Itoa(len(data.Encode())))
+// 	req, err := http.NewRequest("POST", config.SuperURL, strings.NewReader(data.Encode()))
+// 	if err != nil {
+// 		log.Error("new request super: ", zap.Error(err))
+// 		return false
+// 	}
+// 	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+// 	req.Header.Add("Content-Length", strconv.Itoa(len(data.Encode())))
 
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		log.Error("request super: ", zap.Error(err))
-		return false
-	}
+// 	resp, err := httpClient.Do(req)
+// 	if err != nil {
+// 		log.Error("request super: ", zap.Error(err))
+// 		return false
+// 	}
 
-	defer resp.Body.Close()
-	io.Copy(ioutil.Discard, resp.Body)
+// 	defer resp.Body.Close()
+// 	io.Copy(ioutil.Discard, resp.Body)
 
-	if resp.StatusCode == http.StatusOK {
-		return true
-	}
-	return false
-}
+// 	if resp.StatusCode == http.StatusOK {
+// 		return true
+// 	}
+// 	return false
+// }
 
 //CheckACL check mqtt connect
-func CheckACL(username, access, topic string) bool {
+func (a *authHTTP) CheckACL(username, access, topic string) bool {
 	action := access
 	{
 		aCache := checkCache(action, "", username, "", topic)
@@ -163,7 +162,7 @@ func CheckACL(username, access, topic string) bool {
 	data.Add("access", access)
 	req.URL.RawQuery = data.Encode()
 	// fmt.Println("req:", req)
-	resp, err := httpClient.Do(req)
+	resp, err := a.client.Do(req)
 	if err != nil {
 		log.Error("request acl: ", zap.Error(err))
 		return false
