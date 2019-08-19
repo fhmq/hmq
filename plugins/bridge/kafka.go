@@ -1,29 +1,16 @@
-package kafka
+package bridge
 
 import (
 	"encoding/json"
+	"errors"
 	"io/ioutil"
 	"regexp"
 
 	"github.com/Shopify/sarama"
-	"github.com/fhmq/hmq/logger"
-	"github.com/fhmq/hmq/plugins"
 	"go.uber.org/zap"
 )
 
-const (
-	//Kafka plugin name
-	Kafka = "kafka"
-)
-
-var (
-	kafkaClient sarama.AsyncProducer
-	config      Config
-	log         = logger.Get().Named("kafka")
-)
-
-//Config device kafka config
-type Config struct {
+type kafakConfig struct {
 	Addr             []string          `json:"addr"`
 	ConnectTopic     string            `json:"onConnect"`
 	SubscribeTopic   string            `json:"onSubscribe"`
@@ -33,28 +20,34 @@ type Config struct {
 	RegexpMap        map[string]string `json:"regexpMap"`
 }
 
+type kafka struct {
+	kafakConfig kafakConfig
+	kafkaClient sarama.AsyncProducer
+}
+
 //Init init kafak client
-func Init() {
+func InitKafka() *kafka {
 	log.Info("start connect kafka....")
-	content, err := ioutil.ReadFile("./plugins/kafka/kafka.json")
+	content, err := ioutil.ReadFile("./plugins/mq/kafka/kafka.json")
 	if err != nil {
 		log.Fatal("Read config file error: ", zap.Error(err))
 	}
 	// log.Info(string(content))
-
+	var config kafakConfig
 	err = json.Unmarshal(content, &config)
 	if err != nil {
 		log.Fatal("Unmarshal config file error: ", zap.Error(err))
 	}
-	connect()
+	c := &kafka{kafakConfig: config}
+	c.connect()
+	return c
 }
 
 //connect
-func connect() {
-	var err error
+func (k *kafka) connect() {
 	conf := sarama.NewConfig()
 	conf.Version = sarama.V1_1_1_0
-	kafkaClient, err = sarama.NewAsyncProducer(config.Addr, conf)
+	kafkaClient, err := sarama.NewAsyncProducer(k.kafakConfig.Addr, conf)
 	if err != nil {
 		log.Fatal("create kafka async producer failed: ", zap.Error(err))
 	}
@@ -64,18 +57,21 @@ func connect() {
 			log.Error("send msg to kafka failed: ", zap.Error(err))
 		}
 	}()
+
+	k.kafkaClient = kafkaClient
 }
 
 //Publish publish to kafka
-func Publish(e *plugins.Elements) {
+func (k *kafka) Publish(e *Elements) error {
+	config := k.kafakConfig
 	key := e.ClientID
 	var topics []string
 	switch e.Action {
-	case plugins.Connect:
+	case Connect:
 		if config.ConnectTopic != "" {
 			topics = append(topics, config.ConnectTopic)
 		}
-	case plugins.Publish:
+	case Publish:
 		if config.PublishTopic != "" {
 			topics = append(topics, config.PublishTopic)
 		}
@@ -86,38 +82,34 @@ func Publish(e *plugins.Elements) {
 				topics = append(topics, topic)
 			}
 		}
-	case plugins.Subscribe:
+	case Subscribe:
 		if config.SubscribeTopic != "" {
 			topics = append(topics, config.SubscribeTopic)
 		}
-	case plugins.Unsubscribe:
+	case Unsubscribe:
 		if config.UnsubscribeTopic != "" {
 			topics = append(topics, config.UnsubscribeTopic)
 		}
-	case plugins.Disconnect:
+	case Disconnect:
 		if config.DisconnectTopic != "" {
 			topics = append(topics, config.DisconnectTopic)
 		}
 	default:
-		log.Error("error action: ", zap.String("action", e.Action))
-		return
+		return errors.New("error action: " + e.Action)
 	}
 
-	err := publish(topics, key, e)
-	if err != nil {
-		log.Error("publish kafka error: ", zap.Error(err))
-	}
+	return k.publish(topics, key, e)
 
 }
 
-func publish(topics []string, key string, msg *plugins.Elements) error {
+func (k *kafka) publish(topics []string, key string, msg *Elements) error {
 	payload, err := json.Marshal(msg)
 	if err != nil {
 		return err
 	}
 
 	for _, topic := range topics {
-		kafkaClient.Input() <- &sarama.ProducerMessage{
+		k.kafkaClient.Input() <- &sarama.ProducerMessage{
 			Topic: topic,
 			Key:   sarama.ByteEncoder(key),
 			Value: sarama.ByteEncoder(payload),

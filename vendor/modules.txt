@@ -26,7 +26,7 @@ github.com/gin-gonic/gin/render
 # github.com/go-ole/go-ole v1.2.4
 github.com/go-ole/go-ole
 github.com/go-ole/go-ole/oleutil
-# github.com/golang/protobuf v1.3.1
+# github.com/golang/protobuf v1.3.2
 github.com/golang/protobuf/proto
 # github.com/golang/snappy v0.0.1
 github.com/golang/snappy
@@ -69,25 +69,25 @@ github.com/tidwall/match
 github.com/tidwall/pretty
 # github.com/ugorji/go v1.1.4
 github.com/ugorji/go/codec
-# go.uber.org/atomic v1.3.2
+# go.uber.org/atomic v1.4.0
 go.uber.org/atomic
 # go.uber.org/multierr v1.1.0
 go.uber.org/multierr
-# go.uber.org/zap v1.9.1
+# go.uber.org/zap v1.10.0
 go.uber.org/zap
-go.uber.org/zap/internal/bufferpool
 go.uber.org/zap/zapcore
+go.uber.org/zap/internal/bufferpool
 go.uber.org/zap/buffer
 go.uber.org/zap/internal/color
 go.uber.org/zap/internal/exit
-# golang.org/x/crypto v0.0.0-20190422183909-d864b10871cd
+# golang.org/x/crypto v0.0.0-20190701094942-4def268fd1a4
 golang.org/x/crypto/md4
 golang.org/x/crypto/pbkdf2
-# golang.org/x/net v0.0.0-20190503192946-f4e77d36d62c
+# golang.org/x/net v0.0.0-20190724013045-ca1201d0de80
 golang.org/x/net/websocket
 golang.org/x/net/proxy
 golang.org/x/net/internal/socks
-# golang.org/x/sys v0.0.0-20190422165155-953cdadca894
+# golang.org/x/sys v0.0.0-20190730183949-1393eb018365
 golang.org/x/sys/unix
 golang.org/x/sys/windows
 # gopkg.in/go-playground/validator.v8 v8.18.2

@@ -5,19 +5,27 @@ package logger
 
 import (
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 var (
 	// env can be setup at build time with Go Linker. Value could be prod or whatever else for dev env
-	instance *zap.Logger
-	logCfg   zap.Config
+	instance   *zap.Logger
+	logCfg     zap.Config
+	encoderCfg = zap.NewProductionEncoderConfig()
 )
+
+func init() {
+	encoderCfg.TimeKey = "timestamp"
+	encoderCfg.EncodeTime = zapcore.ISO8601TimeEncoder
+}
 
 // NewDevLogger return a logger for dev builds
 func NewDevLogger() (*zap.Logger, error) {
-	logCfg := zap.NewDevelopmentConfig()
-	// logCfg.Level = zap.NewAtomicLevelAt(zap.DebugLevel)
-	logCfg.DisableStacktrace = true
+	logCfg := zap.NewProductionConfig()
+	logCfg.Level = zap.NewAtomicLevelAt(zap.DebugLevel)
+	// logCfg.DisableStacktrace = true
+	logCfg.EncoderConfig = encoderCfg
 	return logCfg.Build()
 }
 
@@ -26,6 +34,7 @@ func NewProdLogger() (*zap.Logger, error) {
 	logCfg := zap.NewProductionConfig()
 	logCfg.DisableStacktrace = true
 	logCfg.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
+	logCfg.EncoderConfig = encoderCfg
 	return logCfg.Build()
 }
 
