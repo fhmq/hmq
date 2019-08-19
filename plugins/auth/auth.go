@@ -1,7 +1,7 @@
 package auth
 
 import (
-	"github.com/fhmq/rhmq/plugins/auth/authhttp"
+	"github.com/fhmq/hmq/plugins/auth/authhttp"
 )
 
 const (

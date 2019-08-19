@@ -15,7 +15,7 @@ import (
 
 	"github.com/fhmq/hmq/broker/lib/sessions"
 	"github.com/fhmq/hmq/broker/lib/topics"
-	"github.com/fhmq/hmq/plugins"
+	"github.com/fhmq/hmq/plugins/bridge"
 
 	"github.com/eclipse/paho.mqtt.golang/packets"
 	"go.uber.org/zap"
@@ -239,9 +239,6 @@ func (c *client) processRouterPublish(packet *packets.PublishPacket) {
 }
 
 func (c *client) processClientPublish(packet *packets.PublishPacket) {
-	if c.status == Disconnected {
-		return
-	}
 
 	topic := packet.TopicName
 
@@ -251,10 +248,10 @@ func (c *client) processClientPublish(packet *packets.PublishPacket) {
 	}
 
 	//publish kafka
-	c.broker.Publish(&plugins.Elements{
+	c.broker.Publish(&bridge.Elements{
 		ClientID:  c.info.clientID,
 		Username:  c.info.username,
-		Action:    plugins.Publish,
+		Action:    bridge.Publish,
 		Timestamp: time.Now().Unix(),
 		Payload:   string(packet.Payload),
 		Topic:     topic,
@@ -366,10 +363,10 @@ func (c *client) processClientSubscribe(packet *packets.SubscribePacket) {
 			continue
 		}
 
-		b.Publish(&plugins.Elements{
+		b.Publish(&bridge.Elements{
 			ClientID:  c.info.clientID,
 			Username:  c.info.username,
-			Action:    plugins.Subscribe,
+			Action:    bridge.Subscribe,
 			Timestamp: time.Now().Unix(),
 			Topic:     topic,
 		})
@@ -547,10 +544,10 @@ func (c *client) processClientUnSubscribe(packet *packets.UnsubscribePacket) {
 		{
 			//publish kafka
 
-			b.Publish(&plugins.Elements{
+			b.Publish(&bridge.Elements{
 				ClientID:  c.info.clientID,
 				Username:  c.info.username,
-				Action:    plugins.Unsubscribe,
+				Action:    bridge.Unsubscribe,
 				Timestamp: time.Now().Unix(),
 				Topic:     topic,
 			})
@@ -603,10 +600,10 @@ func (c *client) Close() {
 	// c.status = Disconnected
 
 	b := c.broker
-	b.Publish(&plugins.Elements{
+	b.Publish(&bridge.Elements{
 		ClientID:  c.info.clientID,
 		Username:  c.info.username,
-		Action:    plugins.Disconnect,
+		Action:    bridge.Disconnect,
 		Timestamp: time.Now().Unix(),
 	})
 

@@ -4,8 +4,6 @@ package broker
 
 import (
 	"strings"
-
-	"github.com/fhmq/hmq/plugins/authhttp"
 )
 
 const (
@@ -14,16 +12,20 @@ const (
 )
 
 func (b *Broker) CheckTopicAuth(action, username, topic string) bool {
-	if b.pluginAuthHTTP {
+	if b.auth != nil {
 		if strings.HasPrefix(topic, "$SYS/broker/connection/clients/") {
 			return true
 		}
 
-		if strings.HasPrefix(topic, "$queue/") {
-			topic = strings.TrimPrefix(topic, "$queue/")
+		if strings.HasPrefix(topic, "$share/") && action == SUB {
+			substr := groupCompile.FindStringSubmatch(topic)
+			if len(substr) != 3 {
+				return false
+			}
+			topic = substr[2]
 		}
 
-		return authhttp.CheckACL(username, action, topic)
+		return b.auth.CheckACL(action, username, topic)
 	}
 
 	return true
@@ -31,11 +33,11 @@ func (b *Broker) CheckTopicAuth(action, username, topic string) bool {
 }
 
 func (b *Broker) CheckConnectAuth(clientID, username, password string) bool {
-	if b.pluginAuthHTTP {
+	if b.auth != nil {
 		if clientID == "" || username == "" {
 			return false
 		}
-		return authhttp.CheckAuth(clientID, username, password)
+		return b.auth.CheckConnect(clientID, username, password)
 	}
 
 	return true

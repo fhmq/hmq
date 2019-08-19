@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fhmq/rhmq/logger"
+	"github.com/fhmq/hmq/logger"
 	"go.uber.org/zap"
 )
 
