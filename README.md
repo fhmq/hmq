@@ -5,8 +5,6 @@ Free and High Performance MQTT Broker
 Golang MQTT Broker, Version 3.1.1, and Compatible
 for [eclipse paho client](https://github.com/eclipse?utf8=%E2%9C%93&q=mqtt&type=&language=) and mosquitto-client
 
-Download: [click here](https://github.com/fhmq/hmq/releases)
-
 ## RUNNING
 ```bash
 $ go get github.com/fhmq/hmq
@@ -111,7 +109,7 @@ Common Options:
  2, config router in hmq.config  ("router": "127.0.0.1:9888")
  
 ```
-
+Other Version Of Cluster Based On gRPC: [click here](https://github.com/fhmq/rhmq)
 
 ### Online/Offline Notification
 ```bash
