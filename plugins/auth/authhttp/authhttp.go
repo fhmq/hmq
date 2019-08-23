@@ -138,8 +138,8 @@ func (a *authHTTP) CheckConnect(clientID, username, password string) bool {
 // }
 
 //CheckACL check mqtt connect
-func (a *authHTTP) CheckACL(username, access, topic string) bool {
-	action := access
+func (a *authHTTP) CheckACL(action, username, topic string) bool {
+
 	{
 		aCache := checkCache(action, "", username, "", topic)
 		if aCache != nil {
@@ -159,7 +159,7 @@ func (a *authHTTP) CheckACL(username, access, topic string) bool {
 
 	data.Add("username", username)
 	data.Add("topic", topic)
-	data.Add("access", access)
+	data.Add("access", action)
 	req.URL.RawQuery = data.Encode()
 	// fmt.Println("req:", req)
 	resp, err := a.client.Do(req)
