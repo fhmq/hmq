@@ -7,9 +7,8 @@
     "onSubscribe": "onSubscribe",
     "onDisconnect": "onDisconnect",
     "onUnsubscribe": "onUnsubscribe",
-    "regexpMap": [
-        {
-            "^/(.+)/(.+)/upload/(.*)$": "upload"
-        }
-    ]
+    "deliverMap": {
+        "#": "publish",
+        "/upload/+/#": "upload"
+    }
 }
