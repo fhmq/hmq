@@ -65,7 +65,7 @@ func (k *kafka) connect() {
 func (k *kafka) Publish(e *Elements) error {
 	config := k.kafakConfig
 	key := e.ClientID
-	var topics map[string]bool
+	topics := make(map[string]bool)
 	switch e.Action {
 	case Connect:
 		if config.ConnectTopic != "" {
