@@ -17,19 +17,20 @@ import (
 )
 
 type Config struct {
-	Worker  int       `json:"workerNum"`
-	Host    string    `json:"host"`
-	Port    string    `json:"port"`
-	Cluster RouteInfo `json:"cluster"`
-	Router  string    `json:"router"`
-	TlsHost string    `json:"tlsHost"`
-	TlsPort string    `json:"tlsPort"`
-	WsPath  string    `json:"wsPath"`
-	WsPort  string    `json:"wsPort"`
-	WsTLS   bool      `json:"wsTLS"`
-	TlsInfo TLSInfo   `json:"tlsInfo"`
-	Debug   bool      `json:"debug"`
-	Plugin  Plugins   `json:"plugins"`
+	Worker   int       `json:"workerNum"`
+	HTTPPort string    `json:"httpPort"`
+	Host     string    `json:"host"`
+	Port     string    `json:"port"`
+	Cluster  RouteInfo `json:"cluster"`
+	Router   string    `json:"router"`
+	TlsHost  string    `json:"tlsHost"`
+	TlsPort  string    `json:"tlsPort"`
+	WsPath   string    `json:"wsPath"`
+	WsPort   string    `json:"wsPort"`
+	WsTLS    bool      `json:"wsTLS"`
+	TlsInfo  TLSInfo   `json:"tlsInfo"`
+	Debug    bool      `json:"debug"`
+	Plugin   Plugins   `json:"plugins"`
 }
 
 type Plugins struct {
@@ -77,6 +78,8 @@ func ConfigureConfig(args []string) (*Config, error) {
 	fs.BoolVar(&help, "help", false, "Show this message.")
 	fs.IntVar(&config.Worker, "w", 1024, "worker num to process message, perfer (client num)/10.")
 	fs.IntVar(&config.Worker, "worker", 1024, "worker num to process message, perfer (client num)/10.")
+	fs.StringVar(&config.HTTPPort, "httpport", "8080", "Port to listen on.")
+	fs.StringVar(&config.HTTPPort, "hp", "8080", "Port to listen on.")
 	fs.StringVar(&config.Port, "port", "1883", "Port to listen on.")
 	fs.StringVar(&config.Port, "p", "1883", "Port to listen on.")
 	fs.StringVar(&config.Host, "host", "0.0.0.0", "Network host to listen on")

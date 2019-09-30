@@ -34,9 +34,6 @@ func (b *Broker) CheckTopicAuth(action, username, topic string) bool {
 
 func (b *Broker) CheckConnectAuth(clientID, username, password string) bool {
 	if b.auth != nil {
-		if clientID == "" || username == "" {
-			return false
-		}
 		return b.auth.CheckConnect(clientID, username, password)
 	}
 

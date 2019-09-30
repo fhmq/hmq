@@ -244,6 +244,9 @@ func (this *snode) smatch(topic []byte, qos byte, subs *[]interface{}, qoss *[]b
 	// let's find the subscribers that match the qos and append them to the list.
 	if len(topic) == 0 {
 		this.matchQos(qos, subs, qoss)
+		if mwcn, _ := this.snodes[MWC]; mwcn != nil {
+			mwcn.matchQos(qos, subs, qoss)
+		}
 		return nil
 	}
 

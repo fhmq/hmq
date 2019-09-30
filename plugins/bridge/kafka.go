@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io/ioutil"
 	"strings"
+	"time"
 
 	"github.com/Shopify/sarama"
 	"go.uber.org/zap"
@@ -109,11 +110,17 @@ func (k *kafka) publish(topics map[string]bool, key string, msg *Elements) error
 	}
 
 	for topic, _ := range topics {
-		k.kafkaClient.Input() <- &sarama.ProducerMessage{
+		select {
+		case k.kafkaClient.Input() <- &sarama.ProducerMessage{
 			Topic: topic,
 			Key:   sarama.ByteEncoder(key),
 			Value: sarama.ByteEncoder(payload),
+		}:
+			continue
+		case <-time.After(5 * time.Second):
+			return errors.New("write kafka timeout")
 		}
+
 	}
 
 	return nil

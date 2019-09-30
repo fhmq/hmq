@@ -123,7 +123,9 @@ func (b *Broker) Start() {
 		return
 	}
 
-	go InitHTTPMoniter(b)
+	if b.config.HTTPPort != "" {
+		go InitHTTPMoniter(b)
+	}
 
 	//listen clinet over tcp
 	if b.config.Port != "" {
