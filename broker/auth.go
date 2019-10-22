@@ -4,6 +4,7 @@ package broker
 
 import (
 	"strings"
+	"crypto/tls"
 )
 
 const (
@@ -11,7 +12,7 @@ const (
 	PUB = "2"
 )
 
-func (b *Broker) CheckTopicAuth(action, username, topic string) bool {
+func (b *Broker) CheckTopicAuth(action string, client *client, topic string) bool {
 	if b.auth != nil {
 		if strings.HasPrefix(topic, "$SYS/broker/connection/clients/") {
 			return true
@@ -23,6 +24,16 @@ func (b *Broker) CheckTopicAuth(action, username, topic string) bool {
 				return false
 			}
 			topic = substr[2]
+		}
+
+		// Replace username by CN if tls connection
+		username := string(client.info.username)
+		tlscon, ok := client.conn.(*tls.Conn)
+		if ok {
+			state := tlscon.ConnectionState()
+			for _, certificate := range state.PeerCertificates {
+				username=certificate.Subject.CommonName
+			}
 		}
 
 		return b.auth.CheckACL(action, username, topic)
