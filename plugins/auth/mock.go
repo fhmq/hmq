@@ -2,7 +2,7 @@ package auth
 
 type mockAuth struct{}
 
-func (m *mockAuth) CheckACL(action, username, topic string) bool {
+func (m *mockAuth) CheckACL(action, clientID, username, ip, topic string) bool {
 	return true
 }
 

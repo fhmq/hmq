@@ -9,7 +9,7 @@ const (
 )
 
 type Auth interface {
-	CheckACL(action, username, topic string) bool
+	CheckACL(action, clientID, username, ip, topic string) bool
 	CheckConnect(clientID, username, password string) bool
 }
 
