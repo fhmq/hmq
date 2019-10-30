@@ -138,7 +138,7 @@ func (a *authHTTP) CheckConnect(clientID, username, password string) bool {
 // }
 
 //CheckACL check mqtt connect
-func (a *authHTTP) CheckACL(action, username, topic string) bool {
+func (a *authHTTP) CheckACL(action, clientID, username, ip, topic string) bool {
 
 	{
 		aCache := checkCache(action, "", username, "", topic)
