@@ -11,7 +11,7 @@ const (
 	PUB = "2"
 )
 
-func (b *Broker) CheckTopicAuth(action, username, topic string) bool {
+func (b *Broker) CheckTopicAuth(action, clientID, username, ip, topic string) bool {
 	if b.auth != nil {
 		if strings.HasPrefix(topic, "$SYS/broker/connection/clients/") {
 			return true
@@ -25,7 +25,7 @@ func (b *Broker) CheckTopicAuth(action, username, topic string) bool {
 			topic = substr[2]
 		}
 
-		return b.auth.CheckACL(action, username, topic)
+		return b.auth.CheckACL(action, clientID, username, ip, topic)
 	}
 
 	return true
