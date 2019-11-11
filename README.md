@@ -81,7 +81,7 @@ Common Options:
 
 * TLS/SSL Support
 
-* AuthHTTP Support
+* Auth Support
 	* Auth Connect
 	* Auth ACL
 	* Cache Support
