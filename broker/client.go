@@ -384,6 +384,11 @@ func (c *client) processClientSubscribe(packet *packets.SubscribePacket) {
 			topic = substr[2]
 		}
 
+		if oldSub, exist := c.subMap[t]; exist {
+			c.topicsMgr.Unsubscribe([]byte(oldSub.topic), oldSub)
+			delete(c.subMap, t)
+		}
+
 		sub := &subscription{
 			topic:     topic,
 			qos:       qoss[i],
