@@ -29,7 +29,7 @@ type kafka struct {
 //Init init kafak client
 func InitKafka() *kafka {
 	log.Info("start connect kafka....")
-	content, err := ioutil.ReadFile("./plugins/mq/kafka/kafka.json")
+	content, err := ioutil.ReadFile("./plugins/kafka/kafka.json")
 	if err != nil {
 		log.Fatal("Read config file error: ", zap.Error(err))
 	}
