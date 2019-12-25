@@ -1,5 +1,3 @@
-/* Copyright (c) 2018, joy.zhou <chowyu08@gmail.com>
- */
 package broker
 
 import (
