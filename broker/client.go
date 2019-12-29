@@ -93,8 +93,8 @@ var (
 
 func (c *client) init() {
 	c.status = Connected
-	c.info.localIP = strings.Split(c.conn.LocalAddr().String(), ":")[0]
-	c.info.remoteIP = strings.Split(c.conn.RemoteAddr().String(), ":")[0]
+	c.info.localIP, _, _ = net.SplitHostPort(c.conn.LocalAddr().String())
+	c.info.remoteIP, _, _ = net.SplitHostPort(c.conn.RemoteAddr().String())
 	c.ctx, c.cancelFunc = context.WithCancel(context.Background())
 	c.subMap = make(map[string]*subscription)
 	c.topicsMgr = c.broker.topicsMgr
