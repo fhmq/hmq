@@ -104,7 +104,7 @@ func (this *memTopics) Retain(msg *packets.PublishPacket) error {
 		return this.rroot.rremove([]byte(msg.TopicName))
 	}
 
-	return this.rroot.rinsert([]byte(msg.TopicName), msg)
+	return this.rroot.rinsertOrUpdate([]byte(msg.TopicName), msg)
 }
 
 func (this *memTopics) Retained(topic []byte, msgs *[]*packets.PublishPacket) error {
@@ -286,13 +286,11 @@ func newRNode() *rnode {
 	}
 }
 
-func (this *rnode) rinsert(topic []byte, msg *packets.PublishPacket) error {
+func (this *rnode) rinsertOrUpdate(topic []byte, msg *packets.PublishPacket) error {
 	// If there's no more topic levels, that means we are at the matching rnode.
 	if len(topic) == 0 {
 		// Reuse the message if possible
-		if this.msg == nil {
-			this.msg = msg
-		}
+		this.msg = msg
 
 		return nil
 	}
@@ -315,7 +313,7 @@ func (this *rnode) rinsert(topic []byte, msg *packets.PublishPacket) error {
 		this.rnodes[level] = n
 	}
 
-	return n.rinsert(rem, msg)
+	return n.rinsertOrUpdate(rem, msg)
 }
 
 // Remove the retained message for the supplied topic
