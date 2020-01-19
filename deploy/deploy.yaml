@@ -19,19 +19,19 @@ spec:
             - containerPort: 1883
             - containerPort: 8080
           volumeMounts:
-            - name: mqtt-broker1
+            - name: mqtt-broker
               mountPath: /conf
               subPath: hmq.config
-            - name: mqtt-broker1
+            - name: mqtt-broker
               mountPath: /plugins/kafka/kafka.json
               subPath: kafka.json
-            - name: mqtt-broker1
+            - name: mqtt-broker
               mountPath: /plugins/authttp/http.json
               subPath: kafka.json     
       volumes:
-        - name: mqtt-broker1
+        - name: mqtt-broker
           configMap:
-            name: mqtt-broker1
+            name: mqtt-broker
             items:
               - key: hmq.config
                 path: hmq.config
