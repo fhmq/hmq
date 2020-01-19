@@ -7,7 +7,7 @@ spec:
     app: mqtt-broker
   ports:
     - protocol: TCP
-      port: 8080
-      targetPort: 8080
+      port: 1883
+      targetPort: 1883
   type: ClusterIP
   sessionAffinity: ClientIP
