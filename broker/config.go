@@ -11,6 +11,8 @@ import (
 	"os"
 
 	"github.com/fhmq/hmq/logger"
+	"github.com/fhmq/hmq/plugins/auth"
+	"github.com/fhmq/hmq/plugins/bridge"
 	"go.uber.org/zap"
 )
 
@@ -32,6 +34,11 @@ type Config struct {
 }
 
 type Plugins struct {
+	Auth   auth.Auth
+	Bridge bridge.BridgeMQ
+}
+
+type NamedPlugins struct {
 	Auth   string
 	Bridge string
 }
@@ -150,6 +157,18 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 
 	return &config, nil
+}
+
+
+func (p *Plugins) UnmarshalJSON(b []byte) error {
+	var named NamedPlugins
+	err := json.Unmarshal(b, &named)
+	if err != nil {
+		return err
+	}
+	p.Auth = auth.NewAuth(named.Auth)
+	p.Bridge = bridge.NewBridgeMQ(named.Bridge)
+	return nil
 }
 
 func (config *Config) check() error {

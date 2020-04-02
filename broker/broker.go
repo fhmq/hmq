@@ -92,8 +92,8 @@ func NewBroker(config *Config) (*Broker, error) {
 		b.tlsConfig = tlsconfig
 	}
 
-	b.auth = auth.NewAuth(b.config.Plugin.Auth)
-	b.bridgeMQ = bridge.NewBridgeMQ(b.config.Plugin.Bridge)
+	b.auth = b.config.Plugin.Auth
+	b.bridgeMQ = b.config.Plugin.Bridge
 
 	return b, nil
 }
