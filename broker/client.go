@@ -94,7 +94,12 @@ var (
 func (c *client) init() {
 	c.status = Connected
 	c.info.localIP, _, _ = net.SplitHostPort(c.conn.LocalAddr().String())
-	c.info.remoteIP, _, _ = net.SplitHostPort(c.conn.RemoteAddr().String())
+	remoteAddr := c.conn.RemoteAddr()
+	remoteNetwork := remoteAddr.Network()
+	c.info.remoteIP = ""
+	if remoteNetwork != "websocket" {
+		c.info.remoteIP, _, _ = net.SplitHostPort(remoteAddr.String())
+	}
 	c.ctx, c.cancelFunc = context.WithCancel(context.Background())
 	c.subMap = make(map[string]*subscription)
 	c.topicsMgr = c.broker.topicsMgr
