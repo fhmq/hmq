@@ -155,12 +155,14 @@ func (b *Broker) StartWebsocketListening() {
 	path := b.config.WsPath
 	hp := ":" + b.config.WsPort
 	log.Info("Start Websocket Listener on:", zap.String("hp", hp), zap.String("path", path))
-	http.Handle(path, websocket.Handler(b.wsHandler))
+	ws := &websocket.Server{Handler: websocket.Handler(b.wsHandler)}
+	mux := http.NewServeMux()
+	mux.Handle(path, ws)
 	var err error
 	if b.config.WsTLS {
-		err = http.ListenAndServeTLS(hp, b.config.TlsInfo.CertFile, b.config.TlsInfo.KeyFile, nil)
+		err = http.ListenAndServeTLS(hp, b.config.TlsInfo.CertFile, b.config.TlsInfo.KeyFile, mux)
 	} else {
-		err = http.ListenAndServe(hp, nil)
+		err = http.ListenAndServe(hp, mux)
 	}
 	if err != nil {
 		log.Error("ListenAndServe:" + err.Error())
