@@ -14,6 +14,7 @@ import (
 	"github.com/fhmq/hmq/broker/lib/sessions"
 	"github.com/fhmq/hmq/broker/lib/topics"
 	"github.com/fhmq/hmq/plugins/bridge"
+	"golang.org/x/net/websocket"
 
 	"github.com/eclipse/paho.mqtt.golang/packets"
 	"go.uber.org/zap"
@@ -99,6 +100,9 @@ func (c *client) init() {
 	c.info.remoteIP = ""
 	if remoteNetwork != "websocket" {
 		c.info.remoteIP, _, _ = net.SplitHostPort(remoteAddr.String())
+	} else {
+		ws := c.conn.(*websocket.Conn)
+		c.info.remoteIP, _, _ = net.SplitHostPort(ws.Request().RemoteAddr)
 	}
 	c.ctx, c.cancelFunc = context.WithCancel(context.Background())
 	c.subMap = make(map[string]*subscription)
