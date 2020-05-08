@@ -107,6 +107,7 @@ func (c *client) init() {
 	c.ctx, c.cancelFunc = context.WithCancel(context.Background())
 	c.subMap = make(map[string]*subscription)
 	c.topicsMgr = c.broker.topicsMgr
+	c.routeSubMap = make(map[string]uint64)
 }
 
 func (c *client) readLoop() {
@@ -343,6 +344,8 @@ func (c *client) ProcessSubscribe(packet *packets.SubscribePacket) {
 	case CLIENT:
 		c.processClientSubscribe(packet)
 	case ROUTER:
+		fallthrough
+	case REMOTE:
 		c.processRouterSubscribe(packet)
 	}
 }

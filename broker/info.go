@@ -46,6 +46,8 @@ func (c *client) SendConnect() {
 		return
 	}
 	m := packets.NewControlPacket(packets.Connect).(*packets.ConnectPacket)
+	m.ProtocolName = "MQIsdp"
+	m.ProtocolVersion = 3
 
 	m.CleanSession = true
 	m.ClientIdentifier = c.info.clientID
