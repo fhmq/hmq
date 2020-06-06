@@ -9,7 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/eclipse/paho.mqtt.golang/packets"
-	uuid "github.com/satori/go.uuid"
+	uuid "github.com/google/uuid"
 )
 
 const (
@@ -114,9 +114,9 @@ func delSubMap(m map[string]uint64, topic string) uint64 {
 }
 
 func GenUniqueId() string {
-	id, err := uuid.NewV4()
+	id, err := uuid.NewRandom()
 	if err != nil {
-		log.Error("uuid.NewV4() return error: " + err.Error())
+		log.Error("uuid.NewRandom() returned an error: " + err.Error())
 	}
 	return id.String()
 }
