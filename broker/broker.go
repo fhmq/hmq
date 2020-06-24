@@ -123,7 +123,7 @@ func (b *Broker) Start() {
 		go InitHTTPMoniter(b)
 	}
 
-	//listen clinet over tcp
+	//listen client over tcp
 	if b.config.Port != "" {
 		go b.StartClientListening(false)
 	}
