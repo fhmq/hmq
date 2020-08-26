@@ -1,4 +1,4 @@
-FROM golang:1.12 as builder
+FROM golang:1.14 as builder
 WORKDIR /go/src/github.com/fhmq/hmq
 COPY . .
 RUN CGO_ENABLED=0 go build -o hmq -a -ldflags '-extldflags "-static"' .

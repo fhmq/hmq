@@ -4,5 +4,8 @@
         "--enable=errcheck,varcheck,deadcode",
         "--enable=varcheck",
         "--enable=deadcode"
+    ],
+    "cSpell.words": [
+        "Authorised"
     ]
 }

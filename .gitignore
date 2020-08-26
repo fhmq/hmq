@@ -2,3 +2,4 @@ hmq
 log
 log/*
 *.test
+.vscode/settings.json

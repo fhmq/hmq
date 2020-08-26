@@ -88,8 +88,8 @@ type route struct {
 }
 
 var (
-	DisconnectdPacket = packets.NewControlPacket(packets.Disconnect).(*packets.DisconnectPacket)
-	r                 = rand.New(rand.NewSource(time.Now().UnixNano()))
+	DisconnectedPacket = packets.NewControlPacket(packets.Disconnect).(*packets.DisconnectPacket)
+	r                  = rand.New(rand.NewSource(time.Now().UnixNano()))
 )
 
 func (c *client) init() {
@@ -131,7 +131,7 @@ func (c *client) readLoop() {
 					log.Error("set read timeout error: ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 					msg := &Message{
 						client: c,
-						packet: DisconnectdPacket,
+						packet: DisconnectedPacket,
 					}
 					b.SubmitWork(c.info.clientID, msg)
 					return
@@ -143,7 +143,7 @@ func (c *client) readLoop() {
 				log.Error("read packet error: ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 				msg := &Message{
 					client: c,
-					packet: DisconnectdPacket,
+					packet: DisconnectedPacket,
 				}
 				b.SubmitWork(c.info.clientID, msg)
 				return
@@ -662,6 +662,11 @@ func (c *client) Close() {
 }
 
 func (c *client) WriterPacket(packet packets.ControlPacket) error {
+	defer func() {
+		if err := recover(); err != nil {
+			log.Error("recover error, ", zap.Any("recover", r))
+		}
+	}()
 	if c.status == Disconnected {
 		return nil
 	}
