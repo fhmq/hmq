@@ -152,8 +152,42 @@ func publish(sub *subscription, packet *packets.PublishPacket) {
 	// 	log.Error("process message for psub error,  ", zap.Error(err))
 	// }
 
-	err := sub.client.WriterPacket(packet)
-	if err != nil {
-		log.Error("process message for psub error,  ", zap.Error(err))
+	switch packet.Qos {
+	case QosAtMostOnce:
+		err := sub.client.WriterPacket(packet)
+		if err != nil {
+			log.Error("process message for psub error,  ", zap.Error(err))
+		}
+	case QosAtLeastOnce, QosExactlyOnce:
+		sub.client.inflight[packet.MessageID] = &inflightElem{status: Publish, packet: packet, timestamp: time.Now().Unix()}
+		err := sub.client.WriterPacket(packet)
+		if err != nil {
+			log.Error("process message for psub error,  ", zap.Error(err))
+		}
+		time.AfterFunc(time.Duration(retryInterval)*time.Second, sub.client.retryDelivery)
+	default:
+		log.Error("publish with unknown qos", zap.String("ClientID", sub.client.info.clientID))
+		return
 	}
+}
+
+func (c *client) retryDelivery() {
+	if len(c.inflight) == 0 {
+		return
+	}
+	now := time.Now().Unix()
+	for _, infEle := range c.inflight{
+		if now - infEle.timestamp >= retryInterval{
+			if infEle.status == Publish {
+				c.WriterPacket(infEle.packet)
+				c.inflight[infEle.packet.MessageID].timestamp = now
+			}else if infEle.status == Pubrel {
+				pubrel := packets.NewControlPacket(packets.Pubrel).(*packets.PubrelPacket)
+				pubrel.MessageID = infEle.packet.MessageID
+				c.WriterPacket(pubrel)
+				c.inflight[infEle.packet.MessageID].timestamp = now
+			}
+		}
+	}
+	time.AfterFunc(time.Duration(retryInterval)*time.Second, c.retryDelivery)
 }
