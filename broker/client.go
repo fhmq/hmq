@@ -52,26 +52,28 @@ var (
 )
 
 type client struct {
-	typ         int
-	mu          sync.Mutex
-	broker      *Broker
-	conn        net.Conn
-	info        info
-	route       route
-	status      int
-	ctx         context.Context
-	cancelFunc  context.CancelFunc
-	session     *sessions.Session
-	subMap      map[string]*subscription
-	topicsMgr   *topics.Manager
-	subs        []interface{}
-	qoss        []byte
-	rmsgs       []*packets.PublishPacket
-	routeSubMap map[string]uint64
-	awaitingRel map[uint16]int64
+	typ            int
+	mu             sync.Mutex
+	broker         *Broker
+	conn           net.Conn
+	info           info
+	route          route
+	status         int
+	ctx            context.Context
+	cancelFunc     context.CancelFunc
+	session        *sessions.Session
+	subMap         map[string]*subscription
+	topicsMgr      *topics.Manager
+	subs           []interface{}
+	qoss           []byte
+	rmsgs          []*packets.PublishPacket
+	routeSubMap    map[string]uint64
+	awaitingRel    map[uint16]int64
 	maxAwaitingRel int
-	inflight map[uint16]*inflightElem
-	mqueue *queue.Queue
+	inflight       map[uint16]*inflightElem
+	mqueue         *queue.Queue
+	retryTimer     *time.Timer
+	retryTimerLock sync.Mutex
 }
 
 type InflightStatus uint8
@@ -82,8 +84,8 @@ const (
 )
 
 type inflightElem struct {
-	status InflightStatus
-	packet *packets.PublishPacket
+	status    InflightStatus
+	packet    *packets.PublishPacket
 	timestamp int64
 }
 type subscription struct {
@@ -203,21 +205,21 @@ func ProcessMessage(msg *Message) {
 		c.ProcessPublish(packet)
 	case *packets.PubackPacket:
 		packet := ca.(*packets.PubackPacket)
-		if _, found := c.inflight[packet.MessageID]; found{
+		if _, found := c.inflight[packet.MessageID]; found {
 			delete(c.inflight, packet.MessageID)
-		}else {
+		} else {
 			log.Error("Duplicated PUBACK PacketId", zap.Uint16("MessageID", packet.MessageID))
 		}
 	case *packets.PubrecPacket:
 		packet := ca.(*packets.PubrecPacket)
-		if _, found := c.inflight[packet.MessageID]; found{
+		if _, found := c.inflight[packet.MessageID]; found {
 			if c.inflight[packet.MessageID].status == Publish {
 				c.inflight[packet.MessageID].status = Pubrel
 				c.inflight[packet.MessageID].timestamp = time.Now().Unix()
-			}else if c.inflight[packet.MessageID].status == Pubrel {
+			} else if c.inflight[packet.MessageID].status == Pubrel {
 				log.Error("Duplicated PUBREC PacketId", zap.Uint16("MessageID", packet.MessageID))
 			}
-		}else{
+		} else {
 			log.Error("The PUBREC PacketId is not found.", zap.Uint16("MessageID", packet.MessageID))
 		}
 
@@ -338,9 +340,9 @@ func (c *client) processClientPublish(packet *packets.PublishPacket) {
 		}
 		c.ProcessPublishMessage(packet)
 	case QosExactlyOnce:
-		if err := c.registerPublishPacketId(packet.MessageID); err != nil{
+		if err := c.registerPublishPacketId(packet.MessageID); err != nil {
 			return
-		}else{
+		} else {
 			pubrec := packets.NewControlPacket(packets.Pubrec).(*packets.PubrecPacket)
 			pubrec.MessageID = packet.MessageID
 			if err := c.WriterPacket(pubrec); err != nil {
@@ -755,14 +757,13 @@ func (c *client) WriterPacket(packet packets.ControlPacket) error {
 	return err
 }
 
-
-func (c *client) registerPublishPacketId(packetId uint16) error{
-	if c.isAwaitingFull(){
+func (c *client) registerPublishPacketId(packetId uint16) error {
+	if c.isAwaitingFull() {
 		log.Error("Dropped qos2 packet for too many awaiting_rel", zap.Uint16("id", packetId))
 		return errors.New("DROPPED_QOS2_PACKET_FOR_TOO_MANY_AWAITING_REL")
 	}
 
-	if _, found := c.awaitingRel[packetId]; found{
+	if _, found := c.awaitingRel[packetId]; found {
 		return errors.New("RC_PACKET_IDENTIFIER_IN_USE")
 	}
 	c.awaitingRel[packetId] = time.Now().Unix()
@@ -770,8 +771,8 @@ func (c *client) registerPublishPacketId(packetId uint16) error{
 	return nil
 }
 
-func (c *client) isAwaitingFull() bool{
-	if c.maxAwaitingRel == 0{
+func (c *client) isAwaitingFull() bool {
+	if c.maxAwaitingRel == 0 {
 		return false
 	}
 	if len(c.awaitingRel) < c.maxAwaitingRel {
@@ -780,13 +781,13 @@ func (c *client) isAwaitingFull() bool{
 	return true
 }
 
-func (c *client) expireAwaitingRel(){
+func (c *client) expireAwaitingRel() {
 	if len(c.awaitingRel) == 0 {
 		return
 	}
 	now := time.Now().Unix()
 	for packetId, Timestamp := range c.awaitingRel {
-		if now - Timestamp >= awaitRelTimeout {
+		if now-Timestamp >= awaitRelTimeout {
 			log.Error("Dropped qos2 packet for await_rel_timeout", zap.Uint16("id", packetId))
 			delete(c.awaitingRel, packetId)
 		}
@@ -794,9 +795,9 @@ func (c *client) expireAwaitingRel(){
 }
 
 func (c *client) pubRel(packetId uint16) error {
-	if _, found := c.awaitingRel[packetId]; found{
+	if _, found := c.awaitingRel[packetId]; found {
 		delete(c.awaitingRel, packetId)
-	}else{
+	} else {
 		log.Error("The PUBREL PacketId is not found", zap.Uint16("id", packetId))
 		return errors.New("RC_PACKET_IDENTIFIER_NOT_FOUND")
 	}

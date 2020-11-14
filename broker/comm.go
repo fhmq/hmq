@@ -164,24 +164,47 @@ func publish(sub *subscription, packet *packets.PublishPacket) {
 		if err != nil {
 			log.Error("process message for psub error,  ", zap.Error(err))
 		}
-		time.AfterFunc(time.Duration(retryInterval)*time.Second, sub.client.retryDelivery)
+		sub.client.ensureRetryTimer()
 	default:
 		log.Error("publish with unknown qos", zap.String("ClientID", sub.client.info.clientID))
 		return
 	}
 }
 
+// timer for retry delivery
+func (c *client) ensureRetryTimer() {
+	if c.retryTimer != nil {
+		return
+	}
+	c.retryTimerLock.Lock()
+	c.retryTimer = time.AfterFunc(time.Duration(retryInterval)*time.Second, c.retryDelivery)
+	c.retryTimerLock.Unlock()
+	return
+}
+
+func (c *client) resetRetryTimer() {
+	if c.retryTimer == nil {
+		return
+	}
+	// reset timer
+	c.retryTimerLock.Lock()
+	c.retryTimer = nil
+	c.retryTimerLock.Unlock()
+
+}
+
 func (c *client) retryDelivery() {
-	if len(c.inflight) == 0 {
+	c.resetRetryTimer()
+	if c.conn == nil || len(c.inflight) == 0 { //Reset timer when client offline OR inflight is empty
 		return
 	}
 	now := time.Now().Unix()
-	for _, infEle := range c.inflight{
-		if now - infEle.timestamp >= retryInterval{
+	for _, infEle := range c.inflight {
+		if now-infEle.timestamp >= retryInterval {
 			if infEle.status == Publish {
 				c.WriterPacket(infEle.packet)
 				c.inflight[infEle.packet.MessageID].timestamp = now
-			}else if infEle.status == Pubrel {
+			} else if infEle.status == Pubrel {
 				pubrel := packets.NewControlPacket(packets.Pubrel).(*packets.PubrelPacket)
 				pubrel.MessageID = infEle.packet.MessageID
 				c.WriterPacket(pubrel)
@@ -189,5 +212,5 @@ func (c *client) retryDelivery() {
 			}
 		}
 	}
-	time.AfterFunc(time.Duration(retryInterval)*time.Second, c.retryDelivery)
+	c.ensureRetryTimer()
 }
