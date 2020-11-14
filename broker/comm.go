@@ -172,12 +172,19 @@ func publish(sub *subscription, packet *packets.PublishPacket) {
 }
 
 // timer for retry delivery
-func (c *client) ensureRetryTimer() {
+func (c *client) ensureRetryTimer(interval ...int64) {
 	if c.retryTimer != nil {
 		return
 	}
+	if len(interval) > 1 {
+		return
+	}
+	timerInterval := retryInterval
+	if len(interval) == 1 {
+		timerInterval = interval[0]
+	}
 	c.retryTimerLock.Lock()
-	c.retryTimer = time.AfterFunc(time.Duration(retryInterval)*time.Second, c.retryDelivery)
+	c.retryTimer = time.AfterFunc(time.Duration(timerInterval)*time.Second, c.retryDelivery)
 	c.retryTimerLock.Unlock()
 	return
 }
@@ -200,7 +207,8 @@ func (c *client) retryDelivery() {
 	}
 	now := time.Now().Unix()
 	for _, infEle := range c.inflight {
-		if now-infEle.timestamp >= retryInterval {
+		age := now - infEle.timestamp
+		if age >= retryInterval {
 			if infEle.status == Publish {
 				c.WriterPacket(infEle.packet)
 				c.inflight[infEle.packet.MessageID].timestamp = now
@@ -210,6 +218,11 @@ func (c *client) retryDelivery() {
 				c.WriterPacket(pubrel)
 				c.inflight[infEle.packet.MessageID].timestamp = now
 			}
+		} else {
+			if age < 0 {
+				age = 0
+			}
+			c.ensureRetryTimer(retryInterval - age)
 		}
 	}
 	c.ensureRetryTimer()

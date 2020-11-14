@@ -43,8 +43,8 @@ const (
 )
 
 const (
-	awaitRelTimeout = 20
-	retryInterval   = 20
+	awaitRelTimeout int64 = 20
+	retryInterval   int64 = 20
 )
 
 var (
