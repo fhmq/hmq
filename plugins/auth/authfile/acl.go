@@ -19,6 +19,5 @@ func (a *aclAuth) CheckConnect(clientID, username, password string) bool {
 }
 
 func (a *aclAuth) CheckACL(action, clientID, username, ip, topic string) bool {
-	// checkTopicAuth(ACLInfo *ACLConfig, action, ip, username, clientid, topic string) bool {
 	return checkTopicAuth(a.config, action, ip, username, clientID, topic)
 }
