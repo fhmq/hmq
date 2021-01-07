@@ -256,16 +256,24 @@ func (this *snode) smatch(topic []byte, qos byte, subs *[]interface{}, qoss *[]b
 		return err
 	}
 
-	level := string(ntl)
+	// If the key is "#", then these subscribers are added to the result set
+	n, ok := this.snodes[MWC]
+	if ok {
+		n.matchQos(qos, subs, qoss)
+	}
 
-	for k, n := range this.snodes {
-		// If the key is "#", then these subscribers are added to the result set
-		if k == MWC {
-			n.matchQos(qos, subs, qoss)
-		} else if k == SWC || k == level {
-			if err := n.smatch(rem, qos, subs, qoss); err != nil {
-				return err
-			}
+	n, ok = this.snodes[SWC]
+	if ok {
+		if err := n.smatch(rem, qos, subs, qoss); err != nil {
+			return err
+		}
+	}
+
+	level := string(ntl)
+	n, ok = this.snodes[level]
+	if ok {
+		if err := n.smatch(rem, qos, subs, qoss); err != nil {
+			return err
 		}
 	}
 
