@@ -177,21 +177,27 @@ func (b *Broker) wsHandler(ws *websocket.Conn) {
 }
 
 func (b *Broker) StartClientListening(Tls bool) {
-	var hp string
 	var err error
 	var l net.Listener
-	if Tls {
-		hp = b.config.TlsHost + ":" + b.config.TlsPort
-		l, err = tls.Listen("tcp", hp, b.tlsConfig)
-		log.Info("Start TLS Listening client on ", zap.String("hp", hp))
-	} else {
-		hp := b.config.Host + ":" + b.config.Port
-		l, err = net.Listen("tcp", hp)
-		log.Info("Start Listening client on ", zap.String("hp", hp))
-	}
-	if err != nil {
-		log.Error("Error listening on ", zap.Error(err))
-		return
+	// Retry listening indefinitely so that specifying IP addresses
+	// (e.g. --host=10.0.0.217) starts working once the IP address is actually
+	// configured on the interface.
+	for {
+		if Tls {
+			hp := b.config.TlsHost + ":" + b.config.TlsPort
+			l, err = tls.Listen("tcp", hp, b.tlsConfig)
+			log.Info("Start TLS Listening client on ", zap.String("hp", hp))
+		} else {
+			hp := b.config.Host + ":" + b.config.Port
+			l, err = net.Listen("tcp", hp)
+			log.Info("Start Listening client on ", zap.String("hp", hp))
+		}
+		if err != nil {
+			log.Error("Error listening on ", zap.Error(err))
+			time.Sleep(1 * time.Second)
+		} else {
+			break // successfully listening
+		}
 	}
 	tmpDelay := 10 * ACCEPT_MIN_SLEEP
 	for {
