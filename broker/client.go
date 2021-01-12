@@ -3,7 +3,6 @@ package broker
 import (
 	"context"
 	"errors"
-	"github.com/eapache/queue"
 	"math/rand"
 	"net"
 	"reflect"
@@ -11,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/eapache/queue"
 
 	"github.com/fhmq/hmq/broker/lib/sessions"
 	"github.com/fhmq/hmq/broker/lib/topics"
@@ -752,9 +753,8 @@ func (c *client) WriterPacket(packet packets.ControlPacket) error {
 	}
 
 	c.mu.Lock()
-	err := packet.Write(c.conn)
-	c.mu.Unlock()
-	return err
+	defer c.mu.Unlock()
+	return packet.Write(c.conn)
 }
 
 func (c *client) registerPublishPacketId(packetId uint16) error {
