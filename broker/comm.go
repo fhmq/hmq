@@ -159,7 +159,9 @@ func publish(sub *subscription, packet *packets.PublishPacket) {
 			log.Error("process message for psub error,  ", zap.Error(err))
 		}
 	case QosAtLeastOnce, QosExactlyOnce:
+		sub.client.inflightMu.Lock()
 		sub.client.inflight[packet.MessageID] = &inflightElem{status: Publish, packet: packet, timestamp: time.Now().Unix()}
+		sub.client.inflightMu.Unlock()
 		err := sub.client.WriterPacket(packet)
 		if err != nil {
 			log.Error("process message for psub error,  ", zap.Error(err))
@@ -202,21 +204,33 @@ func (c *client) resetRetryTimer() {
 
 func (c *client) retryDelivery() {
 	c.resetRetryTimer()
-	if c.conn == nil || len(c.inflight) == 0 { //Reset timer when client offline OR inflight is empty
+	c.inflightMu.RLock()
+	ilen := len(c.inflight)
+	if c.conn == nil || ilen == 0 { //Reset timer when client offline OR inflight is empty
+		c.inflightMu.RUnlock()
 		return
 	}
-	now := time.Now().Unix()
+
+	// copy the to be retried elements out of the map to only hold the lock for a short time and use the new slice later to iterate
+	// through them
+	toRetryEle := make([]*inflightElem, 0, ilen)
 	for _, infEle := range c.inflight {
+		toRetryEle = append(toRetryEle, infEle)
+	}
+	c.inflightMu.RUnlock()
+	now := time.Now().Unix()
+
+	for _, infEle := range toRetryEle {
 		age := now - infEle.timestamp
 		if age >= retryInterval {
 			if infEle.status == Publish {
 				c.WriterPacket(infEle.packet)
-				c.inflight[infEle.packet.MessageID].timestamp = now
+				infEle.timestamp = now
 			} else if infEle.status == Pubrel {
 				pubrel := packets.NewControlPacket(packets.Pubrel).(*packets.PubrelPacket)
 				pubrel.MessageID = infEle.packet.MessageID
 				c.WriterPacket(pubrel)
-				c.inflight[infEle.packet.MessageID].timestamp = now
+				infEle.timestamp = now
 			}
 		} else {
 			if age < 0 {
