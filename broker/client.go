@@ -761,9 +761,8 @@ func (c *client) WriterPacket(packet packets.ControlPacket) error {
 	}
 
 	c.mu.Lock()
-	err := packet.Write(c.conn)
-	c.mu.Unlock()
-	return err
+	defer c.mu.Unlock()
+	return packet.Write(c.conn)
 }
 
 func (c *client) registerPublishPacketId(packetId uint16) error {
