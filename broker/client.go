@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/eapache/queue"
 
@@ -188,6 +189,50 @@ func (c *client) readLoop() {
 
 }
 
+// extractPacketFields function reads a control packet and extracts only the fields
+// that needs to pass on UTF-8 validation
+func extractPacketFields(msgPacket packets.ControlPacket) []string {
+	var fields []string
+
+	switch msgPacket.(type) {
+	case *packets.ConnackPacket:
+	case *packets.ConnectPacket:
+	case *packets.PublishPacket:
+		packet := msgPacket.(*packets.PublishPacket)
+		fields = append(fields, packet.TopicName)
+		break
+
+	case *packets.SubscribePacket:
+	case *packets.SubackPacket:
+	case *packets.UnsubscribePacket:
+		packet := msgPacket.(*packets.UnsubscribePacket)
+		fields = append(fields, packet.Topics...)
+		break
+	}
+
+	return fields
+}
+
+// validatePacketFields function checks if any of control packets fields has ill-formed
+// UTF-8 string
+func validatePacketFields(msgPacket packets.ControlPacket) (validFields bool) {
+
+	// Extract just fields that needs validation
+	fields := extractPacketFields(msgPacket)
+
+	for _, field := range fields {
+		if !utf8.ValidString(field) {
+			validFields = false
+			return
+		}
+	}
+
+	// All fields has been validated successfully
+	validFields = true
+
+	return
+}
+
 func ProcessMessage(msg *Message) {
 	c := msg.client
 	ca := msg.packet
@@ -199,11 +244,28 @@ func ProcessMessage(msg *Message) {
 		log.Debug("Recv message:", zap.String("message type", reflect.TypeOf(msg.packet).String()[9:]), zap.String("ClientID", c.info.clientID))
 	}
 
+	// Perform field validation
+	if !validatePacketFields(ca) {
+
+		// http://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.pdf
+		// Page 193
+		//
+		// If a Server or Client receives a Control Packet
+		// containing ill-formed UTF-8 it MUST close the Network Connection
+
+		c.conn.Close()
+
+		log.Error("Client disconnected due to malformed packet", zap.String("ClientID", c.info.clientID))
+
+		return
+	}
+
 	switch ca.(type) {
 	case *packets.ConnackPacket:
 	case *packets.ConnectPacket:
 	case *packets.PublishPacket:
 		packet := ca.(*packets.PublishPacket)
+
 		c.ProcessPublish(packet)
 	case *packets.PubackPacket:
 		packet := ca.(*packets.PubackPacket)
