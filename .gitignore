@@ -3,3 +3,4 @@ log
 log/*
 *.test
 .vscode/settings.json
+.pre-commit-config.yaml
