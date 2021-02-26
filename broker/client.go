@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"math/rand"
@@ -194,6 +195,7 @@ func (c *client) readLoop() {
 func extractPacketFields(msgPacket packets.ControlPacket) []string {
 	var fields []string
 
+	// Get packet type
 	switch msgPacket.(type) {
 	case *packets.ConnackPacket:
 	case *packets.ConnectPacket:
@@ -221,7 +223,19 @@ func validatePacketFields(msgPacket packets.ControlPacket) (validFields bool) {
 	fields := extractPacketFields(msgPacket)
 
 	for _, field := range fields {
+
+		// Perform the basic UTF-8 validation
 		if !utf8.ValidString(field) {
+			validFields = false
+			return
+		}
+
+		// A UTF-8 encoded string MUST NOT include an encoding of the null
+		// character U+0000
+		// If a receiver (Server or Client) receives a Control Packet containing U+0000
+		// it MUST close the Network Connection
+		// http://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.pdf page 14
+		if bytes.ContainsAny([]byte(field), "\u0000") {
 			validFields = false
 			return
 		}
@@ -248,12 +262,15 @@ func ProcessMessage(msg *Message) {
 	if !validatePacketFields(ca) {
 
 		// http://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.pdf
-		// Page 193
+		// Page 14
 		//
 		// If a Server or Client receives a Control Packet
 		// containing ill-formed UTF-8 it MUST close the Network Connection
 
 		c.conn.Close()
+
+		// Update client status
+		//c.status = Disconnected
 
 		log.Error("Client disconnected due to malformed packet", zap.String("ClientID", c.info.clientID))
 
