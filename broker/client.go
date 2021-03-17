@@ -794,6 +794,10 @@ func (c *client) Close() {
 	if b != nil {
 		b.removeClient(c)
 		for _, sub := range subs {
+			// guard against race condition where a client gets Close() but wasn't initialized yet fully
+			if sub == nil || b.topicsMgr == nil {
+				continue
+			}
 			err := b.topicsMgr.Unsubscribe([]byte(sub.topic), sub)
 			if err != nil {
 				log.Error("unsubscribe error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
