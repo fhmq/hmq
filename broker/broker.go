@@ -549,13 +549,19 @@ func (b *Broker) SendLocalSubsToRouter(c *client) {
 	subInfo := packets.NewControlPacket(packets.Subscribe).(*packets.SubscribePacket)
 	b.clients.Range(func(key, value interface{}) bool {
 		client, ok := value.(*client)
-		if ok {
-			subs := client.subMap
-			for _, sub := range subs {
-				subInfo.Topics = append(subInfo.Topics, sub.topic)
-				subInfo.Qoss = append(subInfo.Qoss, sub.qos)
-			}
+		if !ok {
+			return true
 		}
+
+		client.subMapMu.RLock()
+		defer client.subMapMu.RUnlock()
+
+		subs := client.subMap
+		for _, sub := range subs {
+			subInfo.Topics = append(subInfo.Topics, sub.topic)
+			subInfo.Qoss = append(subInfo.Qoss, sub.qos)
+		}
+
 		return true
 	})
 	if len(subInfo.Topics) > 0 {
@@ -629,16 +635,14 @@ func (b *Broker) PublishMessage(packet *packets.PublishPacket) {
 	}
 }
 
-func (b *Broker) BroadcastUnSubscribe(subs map[string]*subscription) {
+func (b *Broker) BroadcastUnSubscribe(topicsToUnSubscribeFrom []string) {
+	if len(topicsToUnSubscribeFrom) == 0 {
+		return
+	}
 
 	unsub := packets.NewControlPacket(packets.Unsubscribe).(*packets.UnsubscribePacket)
-	for topic, _ := range subs {
-		unsub.Topics = append(unsub.Topics, topic)
-	}
-
-	if len(unsub.Topics) > 0 {
-		b.BroadcastSubOrUnsubMessage(unsub)
-	}
+	unsub.Topics = append(unsub.Topics, topicsToUnSubscribeFrom...)
+	b.BroadcastSubOrUnsubMessage(unsub)
 }
 
 func (b *Broker) OnlineOfflineNotification(clientID string, online bool) {
