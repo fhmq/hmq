@@ -37,7 +37,7 @@ func (p *WorkerPool) Submit(uid string, task func()) {
 
 func (p *WorkerPool) dispatch() {
 	for i := 0; i < p.maxWorkers; i++ {
-		p.taskQueue[i] = make(chan func(), 1024)
+		p.taskQueue[i] = make(chan func())
 		go startWorker(p.taskQueue[i])
 	}
 }
@@ -45,14 +45,12 @@ func (p *WorkerPool) dispatch() {
 func startWorker(taskChan chan func()) {
 	go func() {
 		var task func()
-		var ok bool
 		for {
-			task, ok = <-taskChan
-			if !ok {
-				break
+			select {
+			case task = <-taskChan:
+				// Execute the task.
+				task()
 			}
-			// Execute the task.
-			task()
 		}
 	}()
 }
