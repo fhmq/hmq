@@ -21,7 +21,7 @@ func main() {
 		log.Fatal("New Broker error: ", err)
 	}
 	b.Start()
-
+	defer b.Stop()
 	s := waitForSignal()
 	log.Println("signal received, broker closed.", s)
 }
