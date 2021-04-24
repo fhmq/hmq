@@ -9,8 +9,8 @@ type WorkerPool struct {
 	maxWorkers  int
 	taskQueue   []chan func()
 	stoppedChan chan struct{}
-	ctx context.Context
-	cancel context.CancelFunc
+	ctx         context.Context
+	cancel      context.CancelFunc
 }
 
 func New(maxWorkers int) *WorkerPool {
@@ -26,8 +26,8 @@ func New(maxWorkers int) *WorkerPool {
 		taskQueue:   make([]chan func(), maxWorkers),
 		maxWorkers:  maxWorkers,
 		stoppedChan: make(chan struct{}),
-		ctx: ctx,
-		cancel: cancel,
+		ctx:         ctx,
+		cancel:      cancel,
 	}
 	// Start the task dispatcher.
 	pool.dispatch()
@@ -61,7 +61,7 @@ func startWorker(taskChan chan func(), ctx context.Context) {
 			case task = <-taskChan:
 				// Execute the task.
 				task()
-			case <- ctx.Done():
+			case <-ctx.Done():
 				return
 			}
 		}
