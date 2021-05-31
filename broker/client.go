@@ -180,6 +180,12 @@ func (c *client) readLoop() {
 				return
 			}
 
+			// if packet is disconnect from client, then need to break the read packet loop and clear will msg.
+			if _, isDisconnect := packet.(*packets.DisconnectPacket); isDisconnect {
+				c.info.willMsg = nil
+				c.cancelFunc()
+			}
+
 			msg := &Message{
 				client: c,
 				packet: packet,
