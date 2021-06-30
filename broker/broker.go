@@ -279,21 +279,25 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) {
 	connack.ReturnCode = msg.Validate()
 
 	if connack.ReturnCode != packets.Accepted {
-		err = connack.Write(conn)
-		if err != nil {
-			log.Error("send connack error, ", zap.Error(err), zap.String("clientID", msg.ClientIdentifier))
-			return
-		}
+		func() {
+			defer conn.Close()
+			err = connack.Write(conn)
+			if err != nil {
+				log.Error("send connack error, ", zap.Error(err), zap.String("clientID", msg.ClientIdentifier))
+			}
+		}()
 		return
 	}
 
 	if typ == CLIENT && !b.CheckConnectAuth(string(msg.ClientIdentifier), string(msg.Username), string(msg.Password)) {
 		connack.ReturnCode = packets.ErrRefusedNotAuthorised
-		err = connack.Write(conn)
-		if err != nil {
-			log.Error("send connack error, ", zap.Error(err), zap.String("clientID", msg.ClientIdentifier))
-			return
-		}
+		func() {
+			defer conn.Close()
+			err = connack.Write(conn)
+			if err != nil {
+				log.Error("send connack error, ", zap.Error(err), zap.String("clientID", msg.ClientIdentifier))
+			}
+		}()
 		return
 	}
 
