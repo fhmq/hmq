@@ -159,7 +159,6 @@ func LoadConfig(filename string) (*Config, error) {
 	return &config, nil
 }
 
-
 func (p *Plugins) UnmarshalJSON(b []byte) error {
 	var named NamedPlugins
 	err := json.Unmarshal(b, &named)

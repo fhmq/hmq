@@ -151,6 +151,10 @@ func (b *Broker) Start() {
 
 }
 
+func (b *Broker) Stop() {
+	b.wpool.Stop()
+}
+
 func (b *Broker) StartWebsocketListening() {
 	path := b.config.WsPath
 	hp := ":" + b.config.WsPort
