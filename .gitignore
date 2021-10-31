@@ -4,3 +4,4 @@ log/*
 *.test
 .vscode/settings.json
 .pre-commit-config.yaml
+hmq.exe

@@ -32,7 +32,8 @@ type Elements struct {
 
 const (
 	//Kafka plugin name
-	Kafka = "kafka"
+	Kafka  = "kafka"
+	CSVLog = "csvlog"
 )
 
 type BridgeMQ interface {
@@ -43,6 +44,8 @@ func NewBridgeMQ(name string) BridgeMQ {
 	switch name {
 	case Kafka:
 		return InitKafka()
+	case CSVLog:
+		return InitCSVLog()
 	default:
 		return &mockMQ{}
 	}
