@@ -17,7 +17,7 @@ require (
 	github.com/pkg/errors v0.8.1 // indirect
 	github.com/segmentio/fasthash v0.0.0-20180216231524-a72b379d632e
 	github.com/stretchr/testify v1.4.0
-	github.com/tidwall/gjson v1.6.8
+	github.com/tidwall/gjson v1.9.3
 	go.uber.org/atomic v1.4.0 // indirect
 	go.uber.org/multierr v1.1.0 // indirect
 	go.uber.org/zap v1.10.0
