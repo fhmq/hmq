@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: mqtt-broker
-          image: uhub.service.ucloud.cn/uiot_core_hub/hmq:v0.1.0
+          image: hmq:v0.1.0
           ports:
             - containerPort: 1883
             - containerPort: 8080
