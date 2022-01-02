@@ -55,7 +55,7 @@ func (this *Session) Init(msg *packets.ConnectPacket) error {
 
 	this.topics = make(map[string]byte, 1)
 
-	this.id = string(msg.ClientIdentifier)
+	this.id = msg.ClientIdentifier
 
 	this.initted = true
 

@@ -289,7 +289,7 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) {
 		return
 	}
 
-	if typ == CLIENT && !b.CheckConnectAuth(string(msg.ClientIdentifier), string(msg.Username), string(msg.Password)) {
+	if typ == CLIENT && !b.CheckConnectAuth(msg.ClientIdentifier, msg.Username, string(msg.Password)) {
 		connack.ReturnCode = packets.ErrRefusedNotAuthorised
 		func() {
 			defer conn.Close()
@@ -360,8 +360,8 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) {
 		b.OnlineOfflineNotification(cid, true)
 		{
 			b.Publish(&bridge.Elements{
-				ClientID:  string(msg.ClientIdentifier),
-				Username:  string(msg.Username),
+				ClientID:  msg.ClientIdentifier,
+				Username:  msg.Username,
 				Action:    bridge.Connect,
 				Timestamp: time.Now().Unix(),
 			})
@@ -600,7 +600,7 @@ func (b *Broker) BroadcastSubOrUnsubMessage(packet packets.ControlPacket) {
 }
 
 func (b *Broker) removeClient(c *client) {
-	clientId := string(c.info.clientID)
+	clientId := c.info.clientID
 	typ := c.typ
 	switch typ {
 	case CLIENT:
