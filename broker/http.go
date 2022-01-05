@@ -11,8 +11,8 @@ func InitHTTPMoniter(b *Broker) {
 		clientid := c.Param("clientid")
 		cli, ok := b.clients.Load(clientid)
 		if ok {
-			conn, succss := cli.(*client)
-			if succss {
+			conn, success := cli.(*client)
+			if success {
 				conn.Close()
 			}
 		}
