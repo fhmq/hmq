@@ -2,6 +2,8 @@ hmq
 log
 log/*
 *.test
+# ide
+.idea
 .vscode/settings.json
 .pre-commit-config.yaml
 hmq.exe
