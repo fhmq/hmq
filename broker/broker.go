@@ -255,6 +255,18 @@ func (b *Broker) StartClusterListening() {
 	}
 }
 
+func (b *Broker) DisConnClientByClientId(clientId string) {
+	cli, loaded := b.clients.LoadAndDelete(clientId)
+	if !loaded {
+		return
+	}
+	conn, success := cli.(*client)
+	if !success {
+		return
+	}
+	conn.Close()
+}
+
 func (b *Broker) handleConnection(typ int, conn net.Conn) {
 	//process connect packet
 	packet, err := packets.ReadPacket(conn)
