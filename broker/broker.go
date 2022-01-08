@@ -260,6 +260,7 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) {
 	packet, err := packets.ReadPacket(conn)
 	if err != nil {
 		log.Error("read connect packet error: ", zap.Error(err))
+		conn.Close()
 		return
 	}
 	if packet == nil {
