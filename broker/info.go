@@ -66,7 +66,6 @@ func NewInfo(sid, url string, isforword bool) *packets.PublishPacket {
 	pub.TopicName = BrokerInfoTopic
 	pub.Retain = false
 	info := fmt.Sprintf(`{"brokerID":"%s","brokerUrl":"%s"}`, sid, url)
-	// log.Info("new info", string(info))
 	pub.Payload = []byte(info)
 	return pub
 }

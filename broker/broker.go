@@ -513,7 +513,6 @@ func (b *Broker) connectRouter(id, addr string) {
 
 	c.SendConnect()
 
-	// mpool := b.messagePool[fnv1a.HashString64(cid)%MessagePoolNum]
 	go c.readLoop()
 	go c.StartPing()
 
@@ -596,7 +595,6 @@ func (b *Broker) BroadcastInfoMessage(remoteID string, msg *packets.PublishPacke
 		return true
 
 	})
-	// log.Info("BroadcastInfoMessage success ")
 }
 
 func (b *Broker) BroadcastSubOrUnsubMessage(packet packets.ControlPacket) {
@@ -608,7 +606,6 @@ func (b *Broker) BroadcastSubOrUnsubMessage(packet packets.ControlPacket) {
 		}
 		return true
 	})
-	// log.Info("BroadcastSubscribeMessage remotes: ", s.remotes)
 }
 
 func (b *Broker) removeClient(c *client) {
@@ -622,7 +619,6 @@ func (b *Broker) removeClient(c *client) {
 	case REMOTE:
 		b.remotes.Delete(clientId)
 	}
-	// log.Info("delete client ,", clientId)
 }
 
 func (b *Broker) PublishMessage(packet *packets.PublishPacket) {

@@ -141,17 +141,6 @@ func unWrapPublishPacket(packet *packets.PublishPacket) *packets.PublishPacket {
 }
 
 func publish(sub *subscription, packet *packets.PublishPacket) {
-	// var p *packets.PublishPacket
-	// if sub.client.info.username != "root" {
-	// 	p = unWrapPublishPacket(packet)
-	// } else {
-	// 	p = wrapPublishPacket(packet)
-	// }
-	// err := sub.client.WriterPacket(p)
-	// if err != nil {
-	// 	log.Error("process message for psub error,  ", zap.Error(err))
-	// }
-
 	switch packet.Qos {
 	case QosAtMostOnce:
 		err := sub.client.WriterPacket(packet)
