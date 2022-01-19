@@ -14,14 +14,12 @@ import (
 	"unicode/utf8"
 
 	"github.com/eapache/queue"
-
+	"github.com/eclipse/paho.mqtt.golang/packets"
 	"github.com/fhmq/hmq/broker/lib/sessions"
 	"github.com/fhmq/hmq/broker/lib/topics"
 	"github.com/fhmq/hmq/plugins/bridge"
-	"golang.org/x/net/websocket"
-
-	"github.com/eclipse/paho.mqtt.golang/packets"
 	"go.uber.org/zap"
+	"golang.org/x/net/websocket"
 )
 
 const (
