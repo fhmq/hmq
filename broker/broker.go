@@ -265,6 +265,11 @@ func (b *Broker) DisConnClientByClientId(clientId string) {
 	conn.Close()
 }
 
+func (b *Broker) IsClientIdConnected(clientId string) bool {
+	_, ok := b.clients.Load(clientId)
+	return ok
+}
+
 func (b *Broker) handleConnection(typ int, conn net.Conn) {
 	//process connect packet
 	packet, err := packets.ReadPacket(conn)
