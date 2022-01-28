@@ -78,7 +78,7 @@ func (this *memTopics) Unsubscribe(topic []byte, sub interface{}) error {
 	return this.sroot.sremove(topic, sub)
 }
 
-// Returned values will be invalidated by the next Subscribers call
+// Subscribers Returned values will be invalidated by the next Subscribers call
 func (this *memTopics) Subscribers(topic []byte, qos byte, subs *[]interface{}, qoss *[]byte) error {
 	if !ValidQos(qos) {
 		return fmt.Errorf("Invalid QoS %d", qos)

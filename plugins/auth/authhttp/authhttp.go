@@ -56,7 +56,7 @@ func Init() *authHTTP {
 	return &authHTTP{client: httpClient}
 }
 
-//CheckAuth check mqtt connect
+// CheckConnect check mqtt connect
 func (a *authHTTP) CheckConnect(clientID, username, password string) bool {
 	action := "connect"
 	{

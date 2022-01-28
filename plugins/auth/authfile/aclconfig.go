@@ -37,14 +37,14 @@ func AclConfigLoad(file string) (*ACLConfig, error) {
 		File: file,
 		Info: make([]*AuthInfo, 0, 4),
 	}
-	err := aclconifg.Prase()
+	err := aclconifg.Parse()
 	if err != nil {
 		return nil, err
 	}
 	return aclconifg, err
 }
 
-func (c *ACLConfig) Prase() error {
+func (c *ACLConfig) Parse() error {
 	f, err := os.Open(c.File)
 	defer f.Close()
 	if err != nil {
