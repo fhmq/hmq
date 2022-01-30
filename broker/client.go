@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	// special pub topic for cluster info BrokerInfoTopic
+	// BrokerInfoTopic special pub topic for cluster info
 	BrokerInfoTopic = "broker000100101info"
 	// CLIENT is an end user.
 	CLIENT = 0
