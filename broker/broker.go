@@ -642,6 +642,18 @@ func (b *Broker) PublishMessage(packet *packets.PublishPacket) {
 	}
 }
 
+func (b *Broker) PublishMessageByClientId(packet *packets.PublishPacket, clientId string) error {
+	cli, loaded := b.clients.LoadAndDelete(clientId)
+	if !loaded {
+		return fmt.Errorf("clientId %s not connected", clientId)
+	}
+	conn, success := cli.(*client)
+	if !success {
+		return fmt.Errorf("clientId %s loaded fail", clientId)
+	}
+	return conn.WriterPacket(packet)
+}
+
 func (b *Broker) BroadcastUnSubscribe(topicsToUnSubscribeFrom []string) {
 	if len(topicsToUnSubscribeFrom) == 0 {
 		return
