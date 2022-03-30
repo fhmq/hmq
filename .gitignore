@@ -2,6 +2,7 @@ hmq
 log
 log/*
 *.test
+dist/*
 # ide
 .idea
 .vscode/settings.json

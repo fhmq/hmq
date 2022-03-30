@@ -149,25 +149,22 @@ func (a *authHTTP) CheckACL(action, clientID, username, ip, topic string) bool {
 		}
 	}
 
-	req, err := http.NewRequest("GET", config.ACLURL, nil)
+	data := url.Values{}
+	data.Add("username", username)
+	data.Add("clientid", clientID)
+	data.Add("topic", topic)
+
+	req, err := http.NewRequest("POST", config.ACLURL, strings.NewReader(data.Encode()))
 	if err != nil {
 		log.Error("get acl: ", zap.Error(err))
 		return false
 	}
-
-	data := req.URL.Query()
-
-	data.Add("username", username)
-	data.Add("topic", topic)
-	data.Add("access", action)
-	req.URL.RawQuery = data.Encode()
 	// fmt.Println("req:", req)
 	resp, err := a.client.Do(req)
 	if err != nil {
 		log.Error("request acl: ", zap.Error(err))
 		return false
 	}
-
 	defer resp.Body.Close()
 	io.Copy(ioutil.Discard, resp.Body)
 

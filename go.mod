@@ -11,6 +11,7 @@ require (
 	github.com/google/uuid v1.1.1
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/segmentio/fasthash v0.0.0-20180216231524-a72b379d632e
+	github.com/streadway/amqp v1.0.0
 	github.com/stretchr/testify v1.7.0
 	github.com/tidwall/gjson v1.13.0
 	go.uber.org/zap v1.20.0

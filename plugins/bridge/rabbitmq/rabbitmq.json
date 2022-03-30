@@ -1,0 +1,12 @@
+{
+    "addr": "127.0.0.1:5672",
+    "exchange": "mqtt.bridge",
+    "routingKey": "fogcloud",
+    "username": "rabbitmq",
+    "password": "fogcloud",
+    "onConnect": "onConnect",
+    "onPublish": "onPublish",
+    "onSubscribe": "onSubscribe",
+    "onDisconnect": "onDisconnect",
+    "onUnsubscribe": "onUnsubscribe"
+}

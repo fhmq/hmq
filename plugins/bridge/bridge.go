@@ -23,6 +23,7 @@ var (
 type Elements struct {
 	ClientID  string `json:"clientid"`
 	Username  string `json:"username"`
+	IpAddr    string `json:"ipaddr"`
 	Topic     string `json:"topic"`
 	Payload   string `json:"payload"`
 	Timestamp int64  `json:"ts"`
@@ -32,8 +33,9 @@ type Elements struct {
 
 const (
 	//Kafka plugin name
-	Kafka  = "kafka"
-	CSVLog = "csvlog"
+	Kafka    = "kafka"
+	CSVLog   = "csvlog"
+	Rabbitmq = "rabbitmq"
 )
 
 type BridgeMQ interface {
@@ -46,6 +48,8 @@ func NewBridgeMQ(name string) BridgeMQ {
 		return InitKafka()
 	case CSVLog:
 		return InitCSVLog()
+	case Rabbitmq:
+		return InitRabbitmq()
 	default:
 		return &mockMQ{}
 	}

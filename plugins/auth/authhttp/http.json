@@ -1,5 +1,5 @@
 {
-    "auth": "http://127.0.0.1:9090/mqtt/auth",
-    "acl": "http://127.0.0.1:9090/mqtt/acl",
-    "super": "http://127.0.0.1:9090/mqtt/superuser"
+    "auth": "http://127.0.0.1:4000/mqtt/auth/hmq",
+    "acl": "http://127.0.0.1:4000/mqtt/acl/hmq",
+    "super": "http://127.0.0.1:4000/mqtt/superuser/hmq"
 }
