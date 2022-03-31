@@ -181,14 +181,16 @@ func (c *client) ensureRetryTimer(interval ...int64) {
 }
 
 func (c *client) resetRetryTimer() {
+	// lock mutex before reading retryTimer
+	c.retryTimerLock.Lock()
+	defer c.retryTimerLock.Unlock()
+
 	if c.retryTimer == nil {
 		return
 	}
-	// reset timer
-	c.retryTimerLock.Lock()
-	c.retryTimer = nil
-	c.retryTimerLock.Unlock()
 
+	// reset timer
+	c.retryTimer = nil
 }
 
 func (c *client) retryDelivery() {
