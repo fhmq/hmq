@@ -195,8 +195,10 @@ func (c *client) retryDelivery() {
 	c.resetRetryTimer()
 	c.inflightMu.RLock()
 	ilen := len(c.inflight)
-	if c.conn == nil || ilen == 0 { //Reset timer when client offline OR inflight is empty
+
+	if c.mu.Lock(); c.conn == nil || ilen == 0 { //Reset timer when client offline OR inflight is empty
 		c.inflightMu.RUnlock()
+		c.mu.Unlock()
 		return
 	}
 
