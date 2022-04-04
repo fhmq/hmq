@@ -248,7 +248,7 @@ func validatePacketFields(msgPacket packets.ControlPacket) (validFields bool) {
 		}
 	}
 
-	// All fields has been validated successfully
+	// All fields have been validated successfully
 	validFields = true
 
 	return
