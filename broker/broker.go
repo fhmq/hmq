@@ -283,7 +283,7 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) {
 		return
 	}
 
-	log.Info("read connect from ", zap.String("clientID", msg.ClientIdentifier))
+	log.Info("read connect from ", zap.String("clientID", msg.ClientIdentifier), zap.String("addr", conn.RemoteAddr().String()))
 
 	connack := packets.NewControlPacket(packets.Connack).(*packets.ConnackPacket)
 	connack.SessionPresent = msg.CleanSession
@@ -360,7 +360,8 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) {
 	case CLIENT:
 		old, exist = b.clients.Load(cid)
 		if exist {
-			log.Warn("client exist, close old...", zap.String("clientID", c.info.clientID))
+			log.Warn("client exist, close old...", zap.String("clientID", c.info.clientID),
+				zap.String("addr", conn.RemoteAddr().String()))
 			ol, ok := old.(*client)
 			if ok {
 				ol.Close()
