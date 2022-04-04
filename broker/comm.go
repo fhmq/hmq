@@ -164,9 +164,14 @@ func publish(sub *subscription, packet *packets.PublishPacket) {
 
 // timer for retry delivery
 func (c *client) ensureRetryTimer(interval ...int64) {
+
+	c.retryTimerLock.Lock()
+	defer c.retryTimerLock.Unlock()
+
 	if c.retryTimer != nil {
 		return
 	}
+
 	if len(interval) > 1 {
 		return
 	}
@@ -174,21 +179,23 @@ func (c *client) ensureRetryTimer(interval ...int64) {
 	if len(interval) == 1 {
 		timerInterval = interval[0]
 	}
-	c.retryTimerLock.Lock()
+
 	c.retryTimer = time.AfterFunc(time.Duration(timerInterval)*time.Second, c.retryDelivery)
-	c.retryTimerLock.Unlock()
+
 	return
 }
 
 func (c *client) resetRetryTimer() {
+	// lock mutex before reading retryTimer
+	c.retryTimerLock.Lock()
+	defer c.retryTimerLock.Unlock()
+
 	if c.retryTimer == nil {
 		return
 	}
-	// reset timer
-	c.retryTimerLock.Lock()
-	c.retryTimer = nil
-	c.retryTimerLock.Unlock()
 
+	// reset timer
+	c.retryTimer = nil
 }
 
 func (c *client) retryDelivery() {
