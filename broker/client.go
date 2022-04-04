@@ -808,9 +808,10 @@ func (c *client) Close() {
 		Timestamp: time.Now().Unix(),
 	})
 
-	if c.conn != nil {
+	if c.mu.Lock(); c.conn != nil {
 		_ = c.conn.Close()
 		c.conn = nil
+		c.mu.Unlock()
 	}
 
 	if b == nil {
