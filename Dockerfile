@@ -9,4 +9,4 @@ WORKDIR /
 COPY --from=builder /go/src/github.com/fhmq/hmq/hmq .
 EXPOSE 1883
 
-CMD ["/hmq"]
+ENTRYPOINT ["/hmq"]
