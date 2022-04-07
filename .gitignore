@@ -1,8 +1,11 @@
+# hmq
 hmq
 log
 log/*
 *.test
 dist/*
+conf/hmq.example.config
+
 # ide
 .idea
 .vscode/settings.json

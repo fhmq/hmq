@@ -39,8 +39,10 @@ type Plugins struct {
 }
 
 type NamedPlugins struct {
-	Auth   string
-	Bridge string
+	Auth           string `json:"auth"`
+	AuthConfFile   string `json:"authConfFile"`
+	Bridge         string `json:"bridge"`
+	BridgeConfFile string `json:"bridgeConfFile"`
 }
 
 type RouteInfo struct {
@@ -165,8 +167,8 @@ func (p *Plugins) UnmarshalJSON(b []byte) error {
 	if err != nil {
 		return err
 	}
-	p.Auth = auth.NewAuth(named.Auth)
-	p.Bridge = bridge.NewBridgeMQ(named.Bridge)
+	p.Auth = auth.NewAuth(named.Auth, named.AuthConfFile)
+	p.Bridge = bridge.NewBridgeMQ(named.Bridge, named.BridgeConfFile)
 	return nil
 }
 

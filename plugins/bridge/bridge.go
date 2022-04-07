@@ -42,14 +42,14 @@ type BridgeMQ interface {
 	Publish(e *Elements) error
 }
 
-func NewBridgeMQ(name string) BridgeMQ {
+func NewBridgeMQ(name string, confFilepath string) BridgeMQ {
 	switch name {
 	case Kafka:
-		return InitKafka()
+		return InitKafka(confFilepath)
 	case CSVLog:
 		return InitCSVLog()
 	case Rabbitmq:
-		return InitRabbitmq()
+		return InitRabbitmq(confFilepath)
 	default:
 		return &mockMQ{}
 	}

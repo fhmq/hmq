@@ -15,12 +15,12 @@ type Auth interface {
 	CheckConnect(clientID, username, password string) bool
 }
 
-func NewAuth(name string) Auth {
+func NewAuth(name string, confFile string) Auth {
 	switch name {
 	case AuthHTTP:
-		return authhttp.Init()
+		return authhttp.Init(confFile)
 	case AuthFile:
-		return authfile.Init()
+		return authfile.Init(confFile)
 	default:
 		return &mockAuth{}
 	}

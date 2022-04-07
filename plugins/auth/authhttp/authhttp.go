@@ -32,8 +32,8 @@ var (
 )
 
 //Init init kafak client
-func Init() *authHTTP {
-	content, err := ioutil.ReadFile("./plugins/auth/authhttp/http.json")
+func Init(confFile string) *authHTTP {
+	content, err := ioutil.ReadFile(confFile)
 	if err != nil {
 		log.Fatal("Read config file error: ", zap.Error(err))
 	}

@@ -375,7 +375,7 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) {
 				Username:  msg.Username,
 				Action:    bridge.Connect,
 				Timestamp: time.Now().Unix(),
-				IpAddr:    c.conn.RemoteAddr().String(),
+				IpAddr:    c.info.remoteIP,
 			})
 		}
 	case ROUTER:

@@ -13,7 +13,7 @@
             "program": "${workspaceFolder}",
             "args": [
                 "-c",
-                "${workspaceFolder}/conf/hmq.config"
+                "${workspaceFolder}/conf/hmq.example.config"
             ]
         }
 

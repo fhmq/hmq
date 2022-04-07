@@ -27,9 +27,9 @@ type RabbitmqBridgeConfig struct {
 	DeliverMap       map[string]string `json:"deliverMap"`
 }
 
-func InitRabbitmq() *RabbitmqBridge {
+func InitRabbitmq(confFilepath string) *RabbitmqBridge {
 	log.Info("start connect rabbitmq....")
-	content, err := ioutil.ReadFile("./plugins/bridge/rabbitmq/rabbitmq.json")
+	content, err := ioutil.ReadFile(confFilepath)
 	if err != nil {
 		log.Fatal("Read config file error: ", zap.Error(err))
 	}
