@@ -353,7 +353,7 @@ func (c *csvLog) logFilePrune() error {
 // Publish implements the bridge interface - it accepts an Element then checks to see if that element is a
 // message published to the admin topic for the plugin
 //
-func (c *csvLog) Publish(e *Elements) error {
+func (c *csvLog) Publish(e *Elements) (bool, error) {
 	// A short-lived lock on c allows us to
 	// get the Command topic then release the lock
 	// This then allows us to process the command - which may
@@ -372,7 +372,7 @@ func (c *csvLog) Publish(e *Elements) error {
 	// If the outfile is set to "{NULL}" we don't do anything with the message - we just return nil
 	// This feature is here to allow CSVLOG to be enabled/disabled at runtime
 	if OutFile == "{NULL}" {
-		return nil
+		return false, nil
 	}
 
 	if e.Topic == CommandTopic {
@@ -410,5 +410,5 @@ func (c *csvLog) Publish(e *Elements) error {
 	// Push the message into the channel and return
 	// the channel is buffered and is read by a goroutine so this should block for the shortest possible time
 	c.msgchan <- e
-	return nil
+	return false, nil
 }

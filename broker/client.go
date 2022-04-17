@@ -414,7 +414,7 @@ func (c *client) processClientPublish(packet *packets.PublishPacket) {
 	}
 
 	//publish to bridge mq
-	c.broker.Publish(&bridge.Elements{
+	cost := c.broker.Publish(&bridge.Elements{
 		ClientID:  c.info.clientID,
 		Username:  c.info.username,
 		Action:    bridge.Publish,
@@ -422,6 +422,10 @@ func (c *client) processClientPublish(packet *packets.PublishPacket) {
 		Payload:   string(packet.Payload),
 		Topic:     topic,
 	})
+
+	if cost {
+		return
+	}
 
 	switch packet.Qos {
 	case QosAtMostOnce:

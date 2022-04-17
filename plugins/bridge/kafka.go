@@ -63,7 +63,7 @@ func (k *kafka) connect() {
 }
 
 //Publish publish to kafka
-func (k *kafka) Publish(e *Elements) error {
+func (k *kafka) Publish(e *Elements) (bool, error) {
 	config := k.kafkaConfig
 	key := e.ClientID
 	topics := make(map[string]bool)
@@ -96,10 +96,10 @@ func (k *kafka) Publish(e *Elements) error {
 			topics[config.DisconnectTopic] = true
 		}
 	default:
-		return errors.New("error action: " + e.Action)
+		return false, errors.New("error action: " + e.Action)
 	}
 
-	return k.publish(topics, key, e)
+	return false, k.publish(topics, key, e)
 
 }
 
