@@ -413,7 +413,7 @@ func (c *client) processClientPublish(packet *packets.PublishPacket) {
 		return
 	}
 
-	//publish kafka
+	//publish to bridge mq
 	c.broker.Publish(&bridge.Elements{
 		ClientID:  c.info.clientID,
 		Username:  c.info.username,
@@ -474,7 +474,6 @@ func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) {
 		return
 	}
 
-	// fmt.Println("psubs num: ", len(c.subs))
 	if len(c.subs) == 0 {
 		return
 	}

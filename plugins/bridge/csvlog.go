@@ -129,10 +129,9 @@ func (c *csvLog) writeToLog(els []Elements) error {
 // for performance we batch messages into an outqueue and write them in bulk when a timer expires
 func (c *csvLog) Worker() {
 	log.Info("Running CSVLog worker")
-	run := true
 	var outqueue []Elements
 
-	for run == true {
+	for true {
 		c.RLock()
 		waitInterval := c.config.WriteIntervalSecs
 		c.RUnlock()
@@ -191,10 +190,7 @@ func (c *csvLog) Worker() {
 			}
 			break
 		}
-		if run != true {
-			log.Info("Closing CSV Bridge worker")
-			break
-		}
+
 	}
 }
 
