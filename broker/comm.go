@@ -153,6 +153,7 @@ func publish(sub *subscription, packet *packets.PublishPacket) {
 		sub.client.inflightMu.Unlock()
 		err := sub.client.WriterPacket(packet)
 		if err != nil {
+			// test
 			log.Error("process message for psub error,  ", zap.Error(err))
 		}
 		sub.client.ensureRetryTimer()
