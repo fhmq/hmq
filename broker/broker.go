@@ -57,7 +57,17 @@ func newMessagePool() []chan *Message {
 }
 
 func getAdditionalLogFields(clientIdentifier string, conn net.Conn, additionalFields ...zapcore.Field) []zapcore.Field {
+	var wsConn *websocket.Conn = nil
+	var wsEnabled bool
 	result := []zapcore.Field{}
+
+	switch conn.(type) {
+	case *websocket.Conn:
+		wsEnabled = true
+		wsConn = conn.(*websocket.Conn)
+	case *net.TCPConn:
+		wsEnabled = false
+	}
 
 	// add optional fields
 	if len(additionalFields) > 0 {
@@ -68,9 +78,12 @@ func getAdditionalLogFields(clientIdentifier string, conn net.Conn, additionalFi
 	result = append(result, zap.String("clientID", clientIdentifier))
 
 	// add remote connection address
-	if conn != nil && conn.RemoteAddr() != nil {
+	if !wsEnabled && conn != nil && conn.RemoteAddr() != nil {
 		result = append(result, zap.Stringer("addr", conn.RemoteAddr()))
+	} else if wsEnabled && wsConn != nil && wsConn.Request() != nil {
+		result = append(result, zap.String("addr", wsConn.Request().RemoteAddr))
 	}
+
 	return result
 }
 
