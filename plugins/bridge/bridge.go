@@ -37,7 +37,8 @@ const (
 )
 
 type BridgeMQ interface {
-	Publish(e *Elements) error
+	// Publish return true to cost the message
+	Publish(e *Elements) (bool, error)
 }
 
 func NewBridgeMQ(name string) BridgeMQ {
