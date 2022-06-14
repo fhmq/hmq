@@ -1,0 +1,23 @@
+name: Generate release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    runs-on: "ubuntu-latest"
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+      - name: Get Date
+        id: date
+        run: echo "::set-output name=date::$(date +'%m-%d-%Y-%H-%M')"
+
+      - name: Make release
+        uses: "marvinpinto/action-automatic-releases@latest"
+        with:
+          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          prerelease: false
