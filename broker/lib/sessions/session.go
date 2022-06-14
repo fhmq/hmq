@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/eclipse/paho.mqtt.golang/packets"
+	"hmq/broker/packets"
 )
 
 const (

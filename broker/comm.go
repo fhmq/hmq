@@ -8,7 +8,8 @@ import (
 	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 
-	"github.com/eclipse/paho.mqtt.golang/packets"
+	"hmq/broker/packets"
+
 	uuid "github.com/google/uuid"
 )
 

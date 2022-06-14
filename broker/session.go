@@ -1,6 +1,6 @@
 package broker
 
-import "github.com/eclipse/paho.mqtt.golang/packets"
+import "hmq/broker/packets"
 
 func (b *Broker) getSession(cli *client, req *packets.ConnectPacket, resp *packets.ConnackPacket) error {
 	// If CleanSession is set to 0, the server MUST resume communications with the

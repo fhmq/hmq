@@ -190,7 +190,6 @@ func (c *client) readLoop() {
 
 			// if packet is disconnect from client, then need to break the read packet loop and clear will msg.
 			if data, isDisconnect := packet.(*packets.DisconnectPacket); isDisconnect {
-
 				/*
 				 * The Server MUST validate that reserved bits are set to zero and
 				 * disconnect the Client if they are not zero
