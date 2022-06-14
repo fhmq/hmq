@@ -57,7 +57,7 @@ type TLSInfo struct {
 
 var DefaultConfig *Config = &Config{
 	Worker: 4096,
-	Host:   "0.0.0.0",
+	Host:   IPADDR_ANY,
 	Port:   "1883",
 }
 
@@ -83,11 +83,11 @@ func ConfigureConfig(args []string) (*Config, error) {
 	fs.BoolVar(&help, "help", false, "Show this message.")
 	fs.IntVar(&config.Worker, "w", 1024, "worker num to process message, perfer (client num)/10.")
 	fs.IntVar(&config.Worker, "worker", 1024, "worker num to process message, perfer (client num)/10.")
-	fs.StringVar(&config.HTTPPort, "httpport", "8080", "Port to listen on.")
-	fs.StringVar(&config.HTTPPort, "hp", "8080", "Port to listen on.")
-	fs.StringVar(&config.Port, "port", "1883", "Port to listen on.")
-	fs.StringVar(&config.Port, "p", "1883", "Port to listen on.")
-	fs.StringVar(&config.Host, "host", "0.0.0.0", "Network host to listen on")
+	fs.StringVar(&config.HTTPPort, "httpport", "8080", MSG_PORT_TO_LISTEN)
+	fs.StringVar(&config.HTTPPort, "hp", "8080", MSG_PORT_TO_LISTEN)
+	fs.StringVar(&config.Port, "port", "1883", MSG_PORT_TO_LISTEN)
+	fs.StringVar(&config.Port, "p", "1883", MSG_PORT_TO_LISTEN)
+	fs.StringVar(&config.Host, "host", IPADDR_ANY, "Network host to listen on")
 	fs.StringVar(&config.Cluster.Port, "cp", "", "Cluster port from which members can connect.")
 	fs.StringVar(&config.Cluster.Port, "clusterport", "", "Cluster port from which members can connect.")
 	fs.StringVar(&config.Router, "r", "", "Router who maintenance cluster info")
@@ -178,13 +178,13 @@ func (config *Config) check() error {
 
 	if config.Port != "" {
 		if config.Host == "" {
-			config.Host = "0.0.0.0"
+			config.Host = IPADDR_ANY
 		}
 	}
 
 	if config.Cluster.Port != "" {
 		if config.Cluster.Host == "" {
-			config.Cluster.Host = "0.0.0.0"
+			config.Cluster.Host = IPADDR_ANY
 		}
 	}
 	if config.Router != "" {
@@ -199,7 +199,7 @@ func (config *Config) check() error {
 			return errors.New("tls config error, no cert or key file.")
 		}
 		if config.TlsHost == "" {
-			config.TlsHost = "0.0.0.0"
+			config.TlsHost = IPADDR_ANY
 		}
 	}
 	return nil

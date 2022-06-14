@@ -5,8 +5,8 @@ import (
 	"testing"
 )
 
-//Test_topicMatch is here to double check the topic matching logic
-func Test_topicMatch(t *testing.T) {
+//testTopicMatch is here to double check the topic matching logic
+func testTopicMatch(t *testing.T) {
 
 	tests := []struct {
 		name   string

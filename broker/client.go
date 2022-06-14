@@ -38,8 +38,12 @@ const (
 	_GroupTopicRegexp = `^\$share/([0-9a-zA-Z_-]+)/(.*)$`
 )
 
+// Possible values for client status field
 const (
+	// Client is currently connected
 	Connected    = 1
+
+	// Client is currently disconnected
 	Disconnected = 2
 )
 
@@ -450,6 +454,7 @@ func (c *client) processClientPublish(packet *packets.PublishPacket) {
 			}
 			c.ProcessPublishMessage(packet)
 		}
+
 		return
 	default:
 		log.Error("publish with unknown qos", zap.String("ClientID", c.info.clientID))

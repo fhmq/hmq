@@ -206,21 +206,66 @@ func (b *Broker) wsHandler(ws *websocket.Conn) {
 	b.handleConnection(CLIENT, ws)
 }
 
+// startSecureListener starts a TCP listener with TLS enabled
+func (b *Broker) startSecureListener() (l net.Listener, err error) {
+	hp := b.config.TlsHost + ":" + b.config.TlsPort
+	l, err = tls.Listen("tcp", hp, b.tlsConfig)
+	log.Info("Start TLS Listening client on ", zap.String("hp", hp))
+
+	return l, err
+}
+
+// startInsecureListener starts a TCP listener without TLS enabled
+func (b *Broker) startInsecureListener() (l net.Listener, err error) {
+	hp := b.config.Host + ":" + b.config.Port
+	l, err = net.Listen("tcp", hp)
+	log.Info("Start Listening client on ", zap.String("hp", hp))
+
+	return l, err
+}
+
+// handleAcceptError handles the error that occurs when the listener fails to accept a new client
+func handleAcceptError(delay time.Duration, err error) (bShouldContinue bool) {
+	if err != nil {
+
+		// Checks error type
+		ne, ok := err.(net.Error)
+
+		// Handle error as needed
+		if ok && ne.Temporary() {
+			log.Error("Temporary Client Accept Error(%v), sleeping %dms", zap.Error(ne),
+				zap.Duration("sleeping", delay/time.Millisecond))
+
+			time.Sleep(delay)
+			delay *= 2
+			if delay > ACCEPT_MAX_SLEEP {
+				delay = ACCEPT_MAX_SLEEP
+			}
+		} else {
+			log.Error("Accept error", zap.Error(err))
+		}
+
+		bShouldContinue = true
+		return
+	}
+
+	bShouldContinue = false
+	return
+}
+
 func (b *Broker) StartClientListening(Tls bool) {
 	var err error
 	var l net.Listener
+
 	// Retry listening indefinitely so that specifying IP addresses
 	// (e.g. --host=10.0.0.217) starts working once the IP address is actually
 	// configured on the interface.
+
 	for {
 		if Tls {
-			hp := b.config.TlsHost + ":" + b.config.TlsPort
-			l, err = tls.Listen("tcp", hp, b.tlsConfig)
-			log.Info("Start TLS Listening client on ", zap.String("hp", hp))
+			l, err = b.startSecureListener()
 		} else {
-			hp := b.config.Host + ":" + b.config.Port
-			l, err = net.Listen("tcp", hp)
-			log.Info("Start Listening client on ", zap.String("hp", hp))
+			l, err = b.startInsecureListener()
 		}
 
 		if err == nil {
@@ -232,28 +277,18 @@ func (b *Broker) StartClientListening(Tls bool) {
 	}
 
 	tmpDelay := 10 * ACCEPT_MIN_SLEEP
-	for {
-		conn, err := l.Accept()
-		if err != nil {
-			if ne, ok := err.(net.Error); ok && ne.Temporary() {
-				log.Error(
-					"Temporary Client Accept Error(%v), sleeping %dms",
-					zap.Error(ne),
-					zap.Duration("sleeping", tmpDelay/time.Millisecond),
-				)
 
-				time.Sleep(tmpDelay)
-				tmpDelay *= 2
-				if tmpDelay > ACCEPT_MAX_SLEEP {
-					tmpDelay = ACCEPT_MAX_SLEEP
-				}
-			} else {
-				log.Error("Accept error", zap.Error(err))
-			}
+	for {
+		// Accepts client and handle error if any
+		conn, err := l.Accept()
+		if handleAcceptError(tmpDelay, err) {
 			continue
 		}
 
+		// set delay time
 		tmpDelay = ACCEPT_MIN_SLEEP
+
+		// Starts connection handling
 		go b.handleConnection(CLIENT, conn)
 	}
 }
@@ -335,7 +370,7 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) {
 		func() {
 			defer conn.Close()
 			if err := connack.Write(conn); err != nil {
-				log.Error("send connack error", getAdditionalLogFields(msg.ClientIdentifier, conn, zap.Error(err))...)
+				log.Error(ERR_SEND_CONNACK, getAdditionalLogFields(msg.ClientIdentifier, conn, zap.Error(err))...)
 			}
 		}()
 		return
@@ -346,14 +381,14 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) {
 		func() {
 			defer conn.Close()
 			if err := connack.Write(conn); err != nil {
-				log.Error("send connack error", getAdditionalLogFields(msg.ClientIdentifier, conn, zap.Error(err))...)
+				log.Error(ERR_SEND_CONNACK, getAdditionalLogFields(msg.ClientIdentifier, conn, zap.Error(err))...)
 			}
 		}()
 		return
 	}
 
 	if err := connack.Write(conn); err != nil {
-		log.Error("send connack error", getAdditionalLogFields(msg.ClientIdentifier, conn, zap.Error(err))...)
+		log.Error(ERR_SEND_CONNACK, getAdditionalLogFields(msg.ClientIdentifier, conn, zap.Error(err))...)
 		return
 	}
 
