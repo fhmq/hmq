@@ -14,10 +14,13 @@ import (
 	"unicode/utf8"
 
 	"github.com/eapache/queue"
-	"github.com/eclipse/paho.mqtt.golang/packets"
-	"github.com/fhmq/hmq/broker/lib/sessions"
-	"github.com/fhmq/hmq/broker/lib/topics"
-	"github.com/fhmq/hmq/plugins/bridge"
+
+	"hmq/broker/packets"
+
+	"hmq/broker/lib/sessions"
+	"hmq/broker/lib/topics"
+	"hmq/plugins/bridge"
+
 	"go.uber.org/zap"
 	"golang.org/x/net/websocket"
 )
@@ -41,7 +44,7 @@ const (
 // Possible values for client status field
 const (
 	// Client is currently connected
-	Connected    = 1
+	Connected = 1
 
 	// Client is currently disconnected
 	Disconnected = 2
@@ -186,7 +189,17 @@ func (c *client) readLoop() {
 			}
 
 			// if packet is disconnect from client, then need to break the read packet loop and clear will msg.
-			if _, isDisconnect := packet.(*packets.DisconnectPacket); isDisconnect {
+			if data, isDisconnect := packet.(*packets.DisconnectPacket); isDisconnect {
+
+				/*
+				 * The Server MUST validate that reserved bits are set to zero and
+				 * disconnect the Client if they are not zero
+				 */
+				if data.Qos != 0 || data.Dup != false || data.Retain != false {
+					nc.Close()
+					log.Error("client forced to disconnect due to malformed packet", zap.String("ClientID", c.info.clientID))
+				}
+
 				c.info.willMsg = nil
 				c.cancelFunc()
 			}
@@ -195,6 +208,7 @@ func (c *client) readLoop() {
 				client: c,
 				packet: packet,
 			}
+
 			b.SubmitWork(c.info.clientID, msg)
 		}
 	}
