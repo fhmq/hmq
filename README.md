@@ -2,14 +2,15 @@
 ![build](https://img.shields.io/github/workflow/status/fhmq/hmq/MacOS%20build?label=MacOS&style=for-the-badge)
 ![build](https://img.shields.io/github/workflow/status/fhmq/hmq/Windows%20build?label=Windows&style=for-the-badge)
 
-Free and High Performance MQTT Broker 
-============
+# Free and High Performance MQTT Broker
 
 ## About
+
 Golang MQTT Broker, Version 3.1.1, and Compatible
 for [eclipse paho client](https://github.com/eclipse?utf8=%E2%9C%93&q=mqtt&type=&language=) and mosquitto-client
 
 ## RUNNING
+
 ```bash
 $ go get github.com/fhmq/hmq
 $ cd $GOPATH/github.com/fhmq/hmq
@@ -17,7 +18,8 @@ $ go run main.go
 ```
 
 ## Usage of hmq:
-~~~
+
+```
 Usage: hmq [options]
 
 Broker Options:
@@ -38,10 +40,11 @@ Cluster Options:
 
 Common Options:
     -h, --help                        Show this message
-~~~
+```
 
 ### hmq.config
-~~~
+
+```
 {
 	"workerNum": 4096,
 	"port": "1883",
@@ -67,55 +70,61 @@ Common Options:
 		"bridge": "kafka"
 	}
 }
-~~~
+```
 
 ### Features and Future
 
-* Supports QOS 0 and 1
+- Supports QOS 0, 1 and 2
 
-* Cluster Support
+- Cluster Support
 
-* Containerization
+- Containerization
 
-* Supports retained messages
+- Supports retained messages
 
-* Supports will messages  
+- Supports will messages
 
-* Websocket Support
+- Websocket Support
 
-* TLS/SSL Support
+- TLS/SSL Support
 
-* Auth Support
-	* Auth Connect
-	* Auth ACL
-	* Cache Support
+- Auth Support
 
-* Kafka Bridge Support
-	* Action Deliver
-	* Regexp Deliver
+  - Auth Connect
+  - Auth ACL
+  - Cache Support
 
-* HTTP API
-	* Disconnect Connect (future more)
+- Kafka Bridge Support
+
+  - Action Deliver
+  - Regexp Deliver
+
+- HTTP API
+  - Disconnect Connect (future more)
 
 ### Share SUBSCRIBE
-~~~
+
+```
 | Prefix              | Examples                                  | Publish                      |
 | ------------------- |-------------------------------------------|--------------------------- --|
 | $share/<group>/topic  | mosquitto_sub -t ‘$share/<group>/topic’ | mosquitto_pub -t ‘topic’     |
-~~~
+```
 
 ### Cluster
+
 ```bash
  1, start router for hmq  (https://github.com/fhmq/router.git)
  	$ go get github.com/fhmq/router
  	$ cd $GOPATH/github.com/fhmq/router
  	$ go run main.go
  2, config router in hmq.config  ("router": "127.0.0.1:9888")
- 
+
 ```
+
 Other Version Of Cluster Based On gRPC: [click here](https://github.com/fhmq/rhmq)
 
 ### Online/Offline Notification
+
 ```bash
  topic:
      $SYS/broker/connection/clients/<clientID>
@@ -125,23 +134,21 @@ Other Version Of Cluster Based On gRPC: [click here](https://github.com/fhmq/rhm
 
 ## Performance
 
-* High throughput
+- High throughput
 
-* High concurrency
+- High concurrency
 
-* Low memory and CPU
-
+- Low memory and CPU
 
 ## License
 
-* Apache License Version 2.0
-
+- Apache License Version 2.0
 
 ## Reference
 
-* Surgermq.(https://github.com/zentures/surgemq)
+- Surgermq.(https://github.com/zentures/surgemq)
 
 ## Benchmark Tool
 
-* https://github.com/inovex/mqtt-stresser
-* https://github.com/krylovsk/mqtt-benchmark
+- https://github.com/inovex/mqtt-stresser
+- https://github.com/krylovsk/mqtt-benchmark
