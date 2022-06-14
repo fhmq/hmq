@@ -195,8 +195,11 @@ func (c *client) readLoop() {
 				 * disconnect the Client if they are not zero
 				 */
 				if data.Qos != 0 || data.Dup != false || data.Retain != false {
-					nc.Close()
+					c.info.willMsg = nil
+					c.conn.Close()
+					c.cancelFunc()
 					log.Error("client forced to disconnect due to malformed packet", zap.String("ClientID", c.info.clientID))
+					return
 				}
 
 				c.info.willMsg = nil
