@@ -356,7 +356,12 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) {
 	}
 	msg, ok := packet.(*packets.ConnectPacket)
 	if !ok {
+		/*
+		* The Server MUST process a second CONNECT Packet sent from a Client as a
+		* protocol violation and disconnect the Client
+		 */
 		log.Error("received msg that was not Connect")
+		conn.Close()
 		return
 	}
 
