@@ -133,7 +133,7 @@ func (b *Broker) SubmitWork(clientId string, msg *Message) {
 		b.wpool = pool.New(b.config.Worker)
 	}
 
-	if msg.client.typ == CLUSTER {
+	if msg.client.category == CLUSTER {
 		b.clusterPool <- msg
 	} else {
 		b.wpool.Submit(clientId, func() {
@@ -342,7 +342,7 @@ func (b *Broker) DisConnClientByClientId(clientId string) {
 	conn.Close()
 }
 
-func (b *Broker) handleConnection(typ int, conn net.Conn) {
+func (broker *Broker) handleConnection(clientType int, conn net.Conn) {
 	//process connect packet
 	packet, err := packets.ReadPacket(conn)
 	if err != nil {
@@ -367,28 +367,30 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) {
 
 	log.Info("read connect from ", getAdditionalLogFields(msg.ClientIdentifier, conn)...)
 
+	// build CONNACK packet
 	connack := packets.NewControlPacket(packets.Connack).(*packets.ConnackPacket)
 	connack.SessionPresent = msg.CleanSession
 	connack.ReturnCode = msg.Validate()
 
+	// Check if packet have been validated
 	if connack.ReturnCode != packets.Accepted {
-		func() {
-			defer conn.Close()
-			if err := connack.Write(conn); err != nil {
-				log.Error(ERR_SEND_CONNACK, getAdditionalLogFields(msg.ClientIdentifier, conn, zap.Error(err))...)
-			}
-		}()
+		defer conn.Close()
+		if err := connack.Write(conn); err != nil {
+			log.Error(ERR_SEND_CONNACK, getAdditionalLogFields(msg.ClientIdentifier, conn, zap.Error(err))...)
+		}
 		return
 	}
 
-	if typ == CLIENT && !b.CheckConnectAuth(msg.ClientIdentifier, msg.Username, string(msg.Password)) {
+	// Handles authorization
+	if clientType == CLIENT &&
+		!broker.CheckConnectAuth(msg.ClientIdentifier, msg.Username, string(msg.Password)) {
 		connack.ReturnCode = packets.ErrRefusedNotAuthorised
-		func() {
-			defer conn.Close()
-			if err := connack.Write(conn); err != nil {
-				log.Error(ERR_SEND_CONNACK, getAdditionalLogFields(msg.ClientIdentifier, conn, zap.Error(err))...)
-			}
-		}()
+
+		defer conn.Close()
+		if err := connack.Write(conn); err != nil {
+			log.Error(ERR_SEND_CONNACK, getAdditionalLogFields(msg.ClientIdentifier, conn, zap.Error(err))...)
+		}
+
 		return
 	}
 
@@ -397,6 +399,7 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) {
 		return
 	}
 
+	// Generates a new will message as needed
 	willmsg := packets.NewControlPacket(packets.Publish).(*packets.PublishPacket)
 	if msg.WillFlag {
 		willmsg.Qos = msg.WillQos
@@ -407,6 +410,8 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) {
 	} else {
 		willmsg = nil
 	}
+
+	// setup client information struct
 	info := info{
 		clientID:  msg.ClientIdentifier,
 		username:  msg.Username,
@@ -416,15 +421,16 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) {
 	}
 
 	c := &client{
-		typ:    typ,
-		broker: b,
-		conn:   conn,
-		info:   info,
+		category: clientType,
+		broker:   broker,
+		conn:     conn,
+		info:     info,
 	}
 
+	// Setup client
 	c.init()
 
-	if err := b.getSession(c, msg, connack); err != nil {
+	if err := broker.getSession(c, msg, connack); err != nil {
 		log.Error("get session error", getAdditionalLogFields(c.info.clientID, conn, zap.Error(err))...)
 		return
 	}
@@ -434,20 +440,24 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) {
 	var exists bool
 	var old interface{}
 
-	switch typ {
+	switch clientType {
 	case CLIENT:
-		old, exists = b.clients.Load(cid)
+
+		// Checks if a specified client exists, and store it as needed
+		old, exists = broker.clients.Load(cid)
 		if exists {
 			if ol, ok := old.(*client); ok {
 				log.Warn("client exists, close old client", getAdditionalLogFields(ol.info.clientID, ol.conn)...)
 				ol.Close()
 			}
 		}
-		b.clients.Store(cid, c)
 
-		b.OnlineOfflineNotification(cid, true)
+		broker.clients.Store(cid, c)
+
+		// Updates client status
+		broker.OnlineOfflineNotification(cid, true)
 		{
-			b.Publish(&bridge.Elements{
+			broker.Publish(&bridge.Elements{
 				ClientID:  msg.ClientIdentifier,
 				Username:  msg.Username,
 				Action:    bridge.Connect,
@@ -455,16 +465,17 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) {
 			})
 		}
 	case ROUTER:
-		old, exists = b.routes.Load(cid)
+		old, exists = broker.routes.Load(cid)
 		if exists {
 			if ol, ok := old.(*client); ok {
 				log.Warn("router exists, close old router", getAdditionalLogFields(ol.info.clientID, ol.conn)...)
 				ol.Close()
 			}
 		}
-		b.routes.Store(cid, c)
+		broker.routes.Store(cid, c)
 	}
 
+	// start reading loop
 	c.readLoop()
 }
 
@@ -501,10 +512,10 @@ func (b *Broker) ConnectToDiscovery() {
 	}
 
 	c := &client{
-		typ:    CLUSTER,
-		broker: b,
-		conn:   conn,
-		info:   info,
+		category: CLUSTER,
+		broker:   b,
+		conn:     conn,
+		info:     info,
 	}
 
 	c.init()
@@ -577,11 +588,11 @@ func (b *Broker) connectRouter(id, addr string) {
 	}
 
 	c := &client{
-		broker: b,
-		typ:    REMOTE,
-		conn:   conn,
-		route:  route,
-		info:   info,
+		broker:   b,
+		category: REMOTE,
+		conn:     conn,
+		route:    route,
+		info:     info,
 	}
 	c.init()
 	b.remotes.Store(cid, c)
@@ -681,7 +692,7 @@ func (b *Broker) BroadcastSubOrUnsubMessage(packet packets.ControlPacket) {
 
 func (b *Broker) removeClient(c *client) {
 	clientId := c.info.clientID
-	typ := c.typ
+	typ := c.category
 	switch typ {
 	case CLIENT:
 		b.clients.Delete(clientId)
@@ -735,6 +746,7 @@ func (b *Broker) BroadcastUnSubscribe(topicsToUnSubscribeFrom []string) {
 	b.BroadcastSubOrUnsubMessage(unsub)
 }
 
+// OnlineOfflineNotification updates the online/offline status of a client
 func (b *Broker) OnlineOfflineNotification(clientID string, online bool) {
 	packet := packets.NewControlPacket(packets.Publish).(*packets.PublishPacket)
 	packet.TopicName = "$SYS/broker/connection/clients/" + clientID

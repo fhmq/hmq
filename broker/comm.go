@@ -141,6 +141,7 @@ func unWrapPublishPacket(packet *packets.PublishPacket) *packets.PublishPacket {
 	return p
 }
 
+// publish function publishes the payload to all matching subscribers
 func publish(sub *subscription, packet *packets.PublishPacket) {
 	switch packet.Qos {
 	case QosAtMostOnce:

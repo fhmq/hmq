@@ -60,7 +60,7 @@ var (
 )
 
 type client struct {
-	typ            int
+	category       int
 	mu             sync.Mutex
 	broker         *Broker
 	conn           net.Conn
@@ -128,6 +128,7 @@ var (
 	r                  = rand.New(rand.NewSource(time.Now().UnixNano()))
 )
 
+// init function initializes a new client
 func (c *client) init() {
 	c.status = Connected
 	c.info.localIP, _, _ = net.SplitHostPort(c.conn.LocalAddr().String())
@@ -150,12 +151,15 @@ func (c *client) init() {
 }
 
 func (c *client) readLoop() {
-	nc := c.conn
-	b := c.broker
-	if nc == nil || b == nil {
+	netConn := c.conn
+	broker := c.broker
+
+	// TODO: improve error handling
+	if netConn == nil || broker == nil {
 		return
 	}
 
+	// Configure both keep alive and timeout
 	keepAlive := time.Second * time.Duration(c.info.keepalive)
 	timeOut := keepAlive + (keepAlive / 2)
 
@@ -166,25 +170,25 @@ func (c *client) readLoop() {
 		default:
 			//add read timeout
 			if keepAlive > 0 {
-				if err := nc.SetReadDeadline(time.Now().Add(timeOut)); err != nil {
+				if err := netConn.SetReadDeadline(time.Now().Add(timeOut)); err != nil {
 					log.Error("set read timeout error: ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 					msg := &Message{
 						client: c,
 						packet: DisconnectedPacket,
 					}
-					b.SubmitWork(c.info.clientID, msg)
+					broker.SubmitWork(c.info.clientID, msg)
 					return
 				}
 			}
 
-			packet, err := packets.ReadPacket(nc)
+			packet, err := packets.ReadPacket(netConn)
 			if err != nil {
 				log.Error("read packet error: ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 				msg := &Message{
 					client: c,
 					packet: DisconnectedPacket,
 				}
-				b.SubmitWork(c.info.clientID, msg)
+				broker.SubmitWork(c.info.clientID, msg)
 				return
 			}
 
@@ -211,7 +215,7 @@ func (c *client) readLoop() {
 				packet: packet,
 			}
 
-			b.SubmitWork(c.info.clientID, msg)
+			broker.SubmitWork(c.info.clientID, msg)
 		}
 	}
 
@@ -281,7 +285,7 @@ func ProcessMessage(msg *Message) {
 		return
 	}
 
-	if c.typ == CLIENT {
+	if c.category == CLIENT {
 		log.Debug("Recv message:", zap.String("message type", reflect.TypeOf(msg.packet).String()[9:]), zap.String("ClientID", c.info.clientID))
 	}
 
@@ -375,7 +379,7 @@ func ProcessMessage(msg *Message) {
 }
 
 func (c *client) ProcessPublish(packet *packets.PublishPacket) {
-	switch c.typ {
+	switch c.category {
 	case CLIENT:
 		c.processClientPublish(packet)
 	case ROUTER:
@@ -485,7 +489,7 @@ func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) {
 	if b == nil {
 		return
 	}
-	typ := c.typ
+	typ := c.category
 
 	if packet.Retain {
 		if err := c.topicsMgr.Retain(packet); err != nil {
@@ -507,7 +511,7 @@ func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) {
 	for i, sub := range c.subs {
 		s, ok := sub.(*subscription)
 		if ok {
-			if s.client.typ == ROUTER {
+			if s.client.category == ROUTER {
 				if typ != CLIENT {
 					continue
 				}
@@ -531,7 +535,7 @@ func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) {
 }
 
 func (c *client) ProcessSubscribe(packet *packets.SubscribePacket) {
-	switch c.typ {
+	switch c.category {
 	case CLIENT:
 		c.processClientSubscribe(packet)
 	case ROUTER:
@@ -706,7 +710,7 @@ func (c *client) processRouterSubscribe(packet *packets.SubscribePacket) {
 }
 
 func (c *client) ProcessUnSubscribe(packet *packets.UnsubscribePacket) {
-	switch c.typ {
+	switch c.category {
 	case CLIENT:
 		c.processClientUnSubscribe(packet)
 	case ROUTER:
@@ -861,7 +865,7 @@ func (c *client) Close() {
 		}
 	}
 
-	if c.typ == CLIENT {
+	if c.category == CLIENT {
 		b.BroadcastUnSubscribe(unSubTopics)
 		//offline notification
 		b.OnlineOfflineNotification(c.info.clientID, false)
@@ -871,12 +875,12 @@ func (c *client) Close() {
 		b.PublishMessage(c.info.willMsg)
 	}
 
-	if c.typ == CLUSTER {
+	if c.category == CLUSTER {
 		b.ConnectToDiscovery()
 	}
 
 	//do reconnect
-	if c.typ == REMOTE {
+	if c.category == REMOTE {
 		go b.connectRouter(c.route.remoteID, c.route.remoteUrl)
 	}
 
