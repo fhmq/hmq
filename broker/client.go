@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"math/rand"
 	"net"
 	"reflect"
@@ -185,7 +186,7 @@ func (c *client) readLoop() {
 
 			packet, err := packets.ReadPacket(netConn)
 			if err != nil {
-				if errors.Is(err, syscall.ECONNRESET) {
+				if errors.Is(err, syscall.ECONNRESET) || errors.Is(err, io.EOF) {
 					log.Error("client closed its connection", zap.String("ClientID", c.info.clientID))
 				} else {
 					log.Error("read packet error: ", zap.Error(err), zap.String("ClientID", c.info.clientID))
