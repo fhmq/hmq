@@ -47,6 +47,17 @@ type Broker struct {
 	bridgeMQ    bridge.BridgeMQ
 }
 
+// CreateNewMessage creates a new pointer to Message struct
+func CreateNewMessage(client *client, packet packets.ControlPacket) (msg *Message) {
+
+	msg = &Message{
+		client: client,
+		packet: packet,
+	}
+
+	return
+}
+
 func newMessagePool() []chan *Message {
 	pool := make([]chan *Message, 0)
 	for i := 0; i < MessagePoolNum; i++ {
@@ -128,19 +139,23 @@ func NewBroker(config *Config) (*Broker, error) {
 	return b, nil
 }
 
-func (b *Broker) SubmitWork(clientId string, msg *Message) {
-	if b.wpool == nil {
-		b.wpool = pool.New(b.config.Worker)
+func (broker *Broker) SubmitWork(clientId string, msg *Message) {
+	if broker.wpool == nil {
+		broker.wpool = pool.New(broker.config.Worker)
 	}
 
 	if msg.client.category == CLUSTER {
-		b.clusterPool <- msg
+		broker.clusterPool <- msg
 	} else {
-		b.wpool.Submit(clientId, func() {
-			ProcessMessage(msg)
-		})
-	}
 
+		// creates function
+		handleMessage := func() {
+			ProcessMessage(msg)
+		}
+
+		// Submit the client to worker pool
+		broker.wpool.Submit(clientId, handleMessage)
+	}
 }
 
 func (b *Broker) Start() {
@@ -343,17 +358,38 @@ func (b *Broker) DisConnClientByClientId(clientId string) {
 }
 
 func (broker *Broker) handleConnection(clientType int, conn net.Conn) {
-	//process connect packet
+	// Process connect packet
 	packet, err := packets.ReadPacket(conn)
 	if err != nil {
 		log.Error("read connect packet error", zap.Error(err))
 		conn.Close()
 		return
 	}
+
 	if packet == nil {
 		log.Error("received nil packet")
 		return
 	}
+
+	// Perform field validation
+	if !validatePacketFields(packet) {
+
+		// http://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.pdf
+		// Page 14
+		//
+		// If a Server or Client receives a Control Packet
+		// containing ill-formed UTF-8 it MUST close the Network Connection
+
+		_ = conn.Close()
+
+		// Update client status
+		//c.status = Disconnected
+
+		log.Error("Client disconnected due to malformed packet")
+
+		return
+	}
+
 	msg, ok := packet.(*packets.ConnectPacket)
 	if !ok {
 		/*
