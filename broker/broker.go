@@ -150,7 +150,7 @@ func (broker *Broker) SubmitWork(clientId string, msg *Message) {
 
 		// creates function
 		handleMessage := func() {
-			ProcessMessage(msg)
+			ProcessClientMessage(msg)
 		}
 
 		// Submit the client to worker pool
@@ -570,7 +570,7 @@ func (b *Broker) processClusterInfo() {
 			log.Error("read message from cluster channel error")
 			return
 		}
-		ProcessMessage(msg)
+		ProcessClientMessage(msg)
 	}
 
 }

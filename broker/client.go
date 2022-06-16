@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -168,6 +169,7 @@ func (c *client) readLoop() {
 		case <-c.ctx.Done():
 			return
 		default:
+
 			//add read timeout
 			if keepAlive > 0 {
 				if err := netConn.SetReadDeadline(time.Now().Add(timeOut)); err != nil {
@@ -183,7 +185,12 @@ func (c *client) readLoop() {
 
 			packet, err := packets.ReadPacket(netConn)
 			if err != nil {
-				log.Error("read packet error: ", zap.Error(err), zap.String("ClientID", c.info.clientID))
+				if errors.Is(err, syscall.ECONNRESET) {
+					log.Error("client closed its connection", zap.String("ClientID", c.info.clientID))
+				} else {
+					log.Error("read packet error: ", zap.Error(err), zap.String("ClientID", c.info.clientID))
+				}
+
 				msg := &Message{
 					client: c,
 					packet: DisconnectedPacket,
@@ -193,15 +200,14 @@ func (c *client) readLoop() {
 			}
 
 			// if packet is disconnect from client, then need to break the read packet loop and clear will msg.
-			if data, isDisconnect := packet.(*packets.DisconnectPacket); isDisconnect {
+			if discPacket, isDisconnect := packet.(*packets.DisconnectPacket); isDisconnect {
 				/*
 				 * The Server MUST validate that reserved bits are set to zero and
 				 * disconnect the Client if they are not zero
 				 */
-				if data.Qos != 0 || data.Dup != false || data.Retain != false {
+				if !discPacket.IsValid() {
 					c.info.willMsg = nil
-					c.conn.Close()
-					c.cancelFunc()
+					c.Close()
 					log.Error("client forced to disconnect due to malformed packet", zap.String("ClientID", c.info.clientID))
 					return
 				}
@@ -278,7 +284,7 @@ func validatePacketFields(msgPacket packets.ControlPacket) (validFields bool) {
 	return
 }
 
-func ProcessMessage(msg *Message) {
+func ProcessClientMessage(msg *Message) {
 	c := msg.client
 	clientPacket := msg.packet
 
@@ -296,17 +302,10 @@ func ProcessMessage(msg *Message) {
 	case *packets.ConnectPacket:
 	case *packets.PublishPacket:
 		packet := clientPacket.(*packets.PublishPacket)
-
 		c.ProcessPublish(packet)
 	case *packets.PubackPacket:
 		packet := clientPacket.(*packets.PubackPacket)
-		c.inflightMu.Lock()
-		if _, found := c.inflight[packet.MessageID]; found {
-			delete(c.inflight, packet.MessageID)
-		} else {
-			log.Error("Duplicated PUBACK PacketId", zap.Uint16("MessageID", packet.MessageID))
-		}
-		c.inflightMu.Unlock()
+		c.processPubAck(packet)
 	case *packets.PubrecPacket:
 		packet := clientPacket.(*packets.PubrecPacket)
 		c.inflightMu.RLock()
@@ -316,8 +315,8 @@ func ProcessMessage(msg *Message) {
 			if ielem.status == Publish {
 				ielem.status = Pubrel
 				ielem.timestamp = time.Now().Unix()
-			} else if ielem.status == Pubrel {
-				log.Error("Duplicated PUBREC PacketId", zap.Uint16("MessageID", packet.MessageID))
+			} else {
+				log.Error("Duplicated PUBREC")
 			}
 		} else {
 			log.Error("The PUBREC PacketId is not found.", zap.Uint16("MessageID", packet.MessageID))
@@ -356,6 +355,7 @@ func ProcessMessage(msg *Message) {
 	case *packets.PingrespPacket:
 	case *packets.DisconnectPacket:
 		c.Close()
+
 	default:
 		log.Info("Recv Unknow message.......", zap.String("ClientID", c.info.clientID))
 	}
@@ -466,53 +466,61 @@ func (c *client) processClientPublish(packet *packets.PublishPacket) {
 
 }
 
+func (c *client) processPubAck(packet *packets.PubackPacket) {
+	c.inflightMu.Lock()
+	defer c.inflightMu.Unlock()
+	delete(c.inflight, packet.MessageID)
+}
+
 func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) {
 
-	b := c.broker
-	if b == nil {
+	broker := c.broker
+	if broker == nil {
 		return
 	}
-	typ := c.category
 
+	clientCategory := c.category
+
+	// Process retain flag
 	if packet.Retain {
 		if err := c.topicsMgr.Retain(packet); err != nil {
 			log.Error("Error retaining message: ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 		}
 	}
 
+	// Retrieve a list of all subscribers to a matching topic
 	err := c.topicsMgr.Subscribers([]byte(packet.TopicName), packet.Qos, &c.subs, &c.qoss)
 	if err != nil {
 		log.Error("Error retrieving subscribers list: ", zap.String("ClientID", c.info.clientID))
 		return
 	}
 
+	// Go back if there is not subscribers
 	if len(c.subs) == 0 {
 		return
 	}
 
-	var qsub []int
-	for i, sub := range c.subs {
-		s, ok := sub.(*subscription)
+	var subscribersQoS []int
+
+	for i, subscriptions := range c.subs {
+		s, ok := subscriptions.(*subscription)
 		if ok {
-			if s.client.category == ROUTER {
-				if typ != CLIENT {
-					continue
-				}
+			if s.client.category == ROUTER && clientCategory != CLIENT {
+				continue
 			}
+
 			if s.share {
-				qsub = append(qsub, i)
+				subscribersQoS = append(subscribersQoS, i)
 			} else {
-				publish(s, packet)
+				publishToSubscribers(s, packet)
 			}
-
 		}
-
 	}
 
-	if len(qsub) > 0 {
-		idx := r.Intn(len(qsub))
-		sub := c.subs[qsub[idx]].(*subscription)
-		publish(sub, packet)
+	if len(subscribersQoS) > 0 {
+		index := r.Intn(len(subscribersQoS))
+		sub := c.subs[subscribersQoS[index]].(*subscription)
+		publishToSubscribers(sub, packet)
 	}
 
 }
@@ -613,6 +621,7 @@ func (c *client) processClientSubscribe(packet *packets.SubscribePacket) {
 		log.Error("send suback error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 		return
 	}
+
 	//broadcast subscribe message
 	go b.BroadcastSubOrUnsubMessage(packet)
 
@@ -800,16 +809,14 @@ func (c *client) ProcessPing() {
 }
 
 func (c *client) Close() {
+
+	c.cancelFunc()
+
 	if c.status == Disconnected {
 		return
 	}
 
-	c.cancelFunc()
-
 	c.status = Disconnected
-	//wait for message complete
-	// time.Sleep(1 * time.Second)
-	// c.status = Disconnected
 
 	b := c.broker
 	b.Publish(&bridge.Elements{
@@ -892,6 +899,8 @@ func (c *client) WriterPacket(packet packets.ControlPacket) error {
 	return packet.Write(c.conn)
 }
 
+// registerPublishPacketId stores the current packet ID into a maps of all
+// packet ID's used by client
 func (c *client) registerPublishPacketId(packetId uint16) error {
 	if c.isAwaitingFull() {
 		log.Error("Dropped qos2 packet for too many awaiting_rel", zap.Uint16("id", packetId))
@@ -900,11 +909,16 @@ func (c *client) registerPublishPacketId(packetId uint16) error {
 
 	c.awaitingRelMu.Lock()
 	defer c.awaitingRelMu.Unlock()
+
+	// checks if packetID is already in use
 	if _, found := c.awaitingRel[packetId]; found {
 		return errors.New("RC_PACKET_IDENTIFIER_IN_USE")
 	}
+
+	// associates the packet id
 	c.awaitingRel[packetId] = time.Now().Unix()
 	time.AfterFunc(time.Duration(awaitRelTimeout)*time.Second, c.expireAwaitingRel)
+
 	return nil
 }
 
