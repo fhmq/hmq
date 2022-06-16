@@ -111,6 +111,7 @@ func delSubMap(m map[string]uint64, topic string) uint64 {
 	} else {
 		m[topic] = 0
 	}
+
 	return 0
 }
 
