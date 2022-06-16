@@ -48,3 +48,8 @@ func (d *DisconnectPacket) Unpack(b io.Reader) error {
 func (d *DisconnectPacket) Details() Details {
 	return Details{Qos: 0, MessageID: 0}
 }
+
+// IsValid returns a flag indicating if current packet is valid
+func (d *DisconnectPacket) IsValid() bool {
+	return d.Qos == 0 && d.Dup == false && d.Retain == false
+}
