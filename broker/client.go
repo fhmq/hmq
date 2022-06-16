@@ -210,11 +210,9 @@ func (c *client) readLoop() {
 				c.cancelFunc()
 			}
 
-			msg := &Message{
-				client: c,
-				packet: packet,
-			}
+			msg := CreateNewMessage(c, packet)
 
+			// Send message to thread pool
 			broker.SubmitWork(c.info.clientID, msg)
 		}
 	}
@@ -280,8 +278,10 @@ func validatePacketFields(msgPacket packets.ControlPacket) (validFields bool) {
 
 func ProcessMessage(msg *Message) {
 	c := msg.client
-	ca := msg.packet
-	if ca == nil {
+	clientPacket := msg.packet
+
+	if clientPacket == nil {
+		log.Debug("Client packet is null", zap.String("ClientID", c.info.clientID))
 		return
 	}
 
@@ -289,34 +289,15 @@ func ProcessMessage(msg *Message) {
 		log.Debug("Recv message:", zap.String("message type", reflect.TypeOf(msg.packet).String()[9:]), zap.String("ClientID", c.info.clientID))
 	}
 
-	// Perform field validation
-	if !validatePacketFields(ca) {
-
-		// http://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.pdf
-		// Page 14
-		//
-		// If a Server or Client receives a Control Packet
-		// containing ill-formed UTF-8 it MUST close the Network Connection
-
-		_ = c.conn.Close()
-
-		// Update client status
-		//c.status = Disconnected
-
-		log.Error("Client disconnected due to malformed packet", zap.String("ClientID", c.info.clientID))
-
-		return
-	}
-
-	switch ca.(type) {
+	switch clientPacket.(type) {
 	case *packets.ConnackPacket:
 	case *packets.ConnectPacket:
 	case *packets.PublishPacket:
-		packet := ca.(*packets.PublishPacket)
+		packet := clientPacket.(*packets.PublishPacket)
 
 		c.ProcessPublish(packet)
 	case *packets.PubackPacket:
-		packet := ca.(*packets.PubackPacket)
+		packet := clientPacket.(*packets.PubackPacket)
 		c.inflightMu.Lock()
 		if _, found := c.inflight[packet.MessageID]; found {
 			delete(c.inflight, packet.MessageID)
@@ -325,7 +306,7 @@ func ProcessMessage(msg *Message) {
 		}
 		c.inflightMu.Unlock()
 	case *packets.PubrecPacket:
-		packet := ca.(*packets.PubrecPacket)
+		packet := clientPacket.(*packets.PubrecPacket)
 		c.inflightMu.RLock()
 		ielem, found := c.inflight[packet.MessageID]
 		c.inflightMu.RUnlock()
@@ -347,7 +328,7 @@ func ProcessMessage(msg *Message) {
 			return
 		}
 	case *packets.PubrelPacket:
-		packet := ca.(*packets.PubrelPacket)
+		packet := clientPacket.(*packets.PubrelPacket)
 		_ = c.pubRel(packet.MessageID)
 		pubcomp := packets.NewControlPacket(packets.Pubcomp).(*packets.PubcompPacket)
 		pubcomp.MessageID = packet.MessageID
@@ -356,16 +337,16 @@ func ProcessMessage(msg *Message) {
 			return
 		}
 	case *packets.PubcompPacket:
-		packet := ca.(*packets.PubcompPacket)
+		packet := clientPacket.(*packets.PubcompPacket)
 		c.inflightMu.Lock()
 		delete(c.inflight, packet.MessageID)
 		c.inflightMu.Unlock()
 	case *packets.SubscribePacket:
-		packet := ca.(*packets.SubscribePacket)
+		packet := clientPacket.(*packets.SubscribePacket)
 		c.ProcessSubscribe(packet)
 	case *packets.SubackPacket:
 	case *packets.UnsubscribePacket:
-		packet := ca.(*packets.UnsubscribePacket)
+		packet := clientPacket.(*packets.UnsubscribePacket)
 		c.ProcessUnSubscribe(packet)
 	case *packets.UnsubackPacket:
 	case *packets.PingreqPacket:
