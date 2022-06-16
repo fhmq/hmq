@@ -169,3 +169,15 @@ func (c *ConnectPacket) Validate() byte {
 func (c *ConnectPacket) Details() Details {
 	return Details{Qos: 0, MessageID: 0}
 }
+
+func (c *ConnectPacket) GetStringFields() (fields []string) {
+
+	fields = append(fields, c.ClientIdentifier)
+	fields = append(fields, c.ProtocolName)
+	fields = append(fields, c.Username)
+	fields = append(fields, c.WillTopic)
+	fields = append(fields, string(c.Password))
+	fields = append(fields, string(c.WillMessage))
+
+	return
+}
