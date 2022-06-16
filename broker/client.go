@@ -228,6 +228,8 @@ func extractPacketFields(msgPacket packets.ControlPacket) []string {
 	switch msgPacket.(type) {
 	case *packets.ConnackPacket:
 	case *packets.ConnectPacket:
+		packet := msgPacket.(*packets.ConnectPacket)
+		fields = packet.GetStringFields()
 	case *packets.PublishPacket:
 		packet := msgPacket.(*packets.PublishPacket)
 		fields = append(fields, packet.TopicName)
