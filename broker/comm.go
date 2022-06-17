@@ -152,6 +152,10 @@ func publishToSubscribers(sub *subscription, packet *packets.PublishPacket, ctx 
 			log.Error("process message for psub error,  ", zap.Error(err))
 		}
 	case QosAtLeastOnce, QosExactlyOnce:
+		// changes the ID of packet that will be sent to subscriber
+		sub.client.nextPacketID()
+		packet.MessageID = uint16(sub.client.packetID)
+
 		sub.client.inflightMu.Lock()
 		sub.client.inflight[packet.MessageID] = &inflightElem{status: Publish, packet: packet, timestamp: time.Now().Unix()}
 		sub.client.inflightMu.Unlock()

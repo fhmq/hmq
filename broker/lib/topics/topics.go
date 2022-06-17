@@ -78,6 +78,8 @@ func (this *Manager) Subscribers(topic []byte, qos byte, subs *[]interface{}, qo
 	return this.p.Subscribers(topic, qos, subs, qoss)
 }
 
+// Retain stores a publish packet to deliver for future subscribers. The last retained message MUST be
+// sent to subscribers
 func (this *Manager) Retain(msg *packets.PublishPacket) error {
 	return this.p.Retain(msg)
 }

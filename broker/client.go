@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unicode/utf8"
@@ -91,6 +92,7 @@ type client struct {
 	mqueue         *queue.Queue
 	retryTimer     *time.Timer
 	retryTimerLock sync.Mutex
+	packetID       uint32
 }
 
 type InflightStatus uint8
@@ -133,6 +135,22 @@ var (
 	r                  = rand.New(rand.NewSource(time.Now().UnixNano()))
 )
 
+// nextPacketID generates the next packet ID to be used by PUBLISH packets
+func (c *client) nextPacketID() {
+
+	id := atomic.LoadUint32(&c.packetID)
+
+	if id == uint32(65535) {
+		id = 1
+		atomic.StoreUint32(&c.packetID, id)
+	} else {
+		id++
+		atomic.StoreUint32(&c.packetID, id)
+	}
+
+	return
+}
+
 // init function initializes a new client
 func (c *client) init() {
 	c.status = Connected
@@ -169,7 +187,10 @@ func (c *client) readLoop(ctx context.Context, cancel context.CancelFunc) {
 
 	for {
 
-		var readFromClient = func(ctx context.Context, cancel context.CancelFunc) {
+		select {
+		case <-ctx.Done():
+			return
+		default:
 			//add read timeout
 			if keepAlive > 0 {
 				if err := netConn.SetReadDeadline(time.Now().Add(timeOut)); err != nil {
@@ -221,13 +242,6 @@ func (c *client) readLoop(ctx context.Context, cancel context.CancelFunc) {
 
 			// Send message to thread pool
 			broker.SubmitWork(c.info.clientID, msg, ctx, cancel)
-		}
-
-		select {
-		case <-ctx.Done():
-			return
-		default:
-			readFromClient(ctx, cancel)
 		}
 	}
 
@@ -324,8 +338,8 @@ func ProcessClientMessage(msg *Message, ctx context.Context, cancel context.Canc
 			if ielem.status == Publish {
 				ielem.status = PubRel
 				ielem.timestamp = time.Now().Unix()
-			} else {
-				log.Error("Duplicated PUBREC")
+			} else if ielem.status == PubRel {
+				log.Error("Duplicated PUBREC PacketId", zap.Uint16("MessageID", packet.MessageID))
 			}
 		} else {
 			log.Error("The PUBREC PacketId is not found.", zap.Uint16("MessageID", packet.MessageID))
@@ -370,6 +384,7 @@ func ProcessClientMessage(msg *Message, ctx context.Context, cancel context.Canc
 	}
 }
 
+// ProcessPublish handle a PUBLISH packet
 func (c *client) ProcessPublish(packet *packets.PublishPacket, ctx context.Context, cancel context.CancelFunc) {
 	switch c.category {
 	case CLIENT:
@@ -420,6 +435,7 @@ func (c *client) processRouterPublish(packet *packets.PublishPacket, ctx context
 
 }
 
+// processClientPublish process a publish packet from a client
 func (c *client) processClientPublish(packet *packets.PublishPacket, ctx context.Context, cancel context.CancelFunc) {
 
 	topic := packet.TopicName
@@ -478,7 +494,12 @@ func (c *client) processClientPublish(packet *packets.PublishPacket, ctx context
 func (c *client) processPubAck(packet *packets.PubackPacket) {
 	c.inflightMu.Lock()
 	defer c.inflightMu.Unlock()
-	delete(c.inflight, packet.MessageID)
+
+	if _, found := c.inflight[packet.MessageID]; found {
+		delete(c.inflight, packet.MessageID)
+	} else {
+		log.Error("Duplicated PUBACK PacketId", zap.Uint16("MessageID", packet.MessageID))
+	}
 }
 
 func (c *client) ProcessPublishMessage(packet *packets.PublishPacket, ctx context.Context, cancel context.CancelFunc) {
@@ -512,16 +533,16 @@ func (c *client) ProcessPublishMessage(packet *packets.PublishPacket, ctx contex
 	var subscribersQoS []int
 
 	for i, subscriptions := range c.subs {
-		s, ok := subscriptions.(*subscription)
+		subscriber, ok := subscriptions.(*subscription)
 		if ok {
-			if s.client.category == ROUTER && clientCategory != CLIENT {
+			if subscriber.client.category == ROUTER && clientCategory != CLIENT {
 				continue
 			}
 
-			if s.share {
+			if subscriber.share {
 				subscribersQoS = append(subscribersQoS, i)
 			} else {
-				publishToSubscribers(s, packet, ctx, cancel)
+				publishToSubscribers(subscriber, packet, ctx, cancel)
 			}
 		}
 	}
@@ -885,6 +906,7 @@ func (c *client) Close(ctx context.Context, cancelFunc context.CancelFunc) {
 
 }
 
+// WriterPacket sends a packet to client
 func (c *client) WriterPacket(packet packets.ControlPacket, ctx context.Context, cancel context.CancelFunc) error {
 	defer func() {
 		if err := recover(); err != nil {
