@@ -1,6 +1,8 @@
 package broker
 
 import (
+	"context"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -13,7 +15,7 @@ func InitHTTPMoniter(b *Broker) {
 		if ok {
 			conn, success := cli.(*client)
 			if success {
-				conn.Close()
+				conn.Close(context.WithCancel(context.Background()))
 			}
 		}
 		resp := map[string]int{

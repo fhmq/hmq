@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"context"
 	"encoding/json"
 	"reflect"
 	"time"
@@ -143,10 +144,10 @@ func unWrapPublishPacket(packet *packets.PublishPacket) *packets.PublishPacket {
 }
 
 // publishToSubscribers function publishes the payload to all matching subscribers
-func publishToSubscribers(sub *subscription, packet *packets.PublishPacket) {
+func publishToSubscribers(sub *subscription, packet *packets.PublishPacket, ctx context.Context, cancel context.CancelFunc) {
 	switch packet.Qos {
 	case QosAtMostOnce:
-		err := sub.client.WriterPacket(packet)
+		err := sub.client.WriterPacket(packet, ctx, cancel)
 		if err != nil {
 			log.Error("process message for psub error,  ", zap.Error(err))
 		}
@@ -154,11 +155,11 @@ func publishToSubscribers(sub *subscription, packet *packets.PublishPacket) {
 		sub.client.inflightMu.Lock()
 		sub.client.inflight[packet.MessageID] = &inflightElem{status: Publish, packet: packet, timestamp: time.Now().Unix()}
 		sub.client.inflightMu.Unlock()
-		err := sub.client.WriterPacket(packet)
+		err := sub.client.WriterPacket(packet, ctx, cancel)
 		if err != nil {
 			log.Error("process message for psub error,  ", zap.Error(err))
 		}
-		sub.client.ensureRetryTimer()
+		sub.client.ensureRetryTimer(ctx, cancel)
 	default:
 		log.Error("publish with unknown qos", zap.String("ClientID", sub.client.info.clientID))
 		return
@@ -166,7 +167,7 @@ func publishToSubscribers(sub *subscription, packet *packets.PublishPacket) {
 }
 
 // timer for retry delivery
-func (c *client) ensureRetryTimer(interval ...int64) {
+func (c *client) ensureRetryTimer(ctx context.Context, cancel context.CancelFunc, interval ...int64) {
 
 	c.retryTimerLock.Lock()
 	defer c.retryTimerLock.Unlock()
@@ -183,7 +184,11 @@ func (c *client) ensureRetryTimer(interval ...int64) {
 		timerInterval = interval[0]
 	}
 
-	c.retryTimer = time.AfterFunc(time.Duration(timerInterval)*time.Second, c.retryDelivery)
+	var retryFunc = func() {
+		c.retryDelivery(ctx, cancel)
+	}
+
+	c.retryTimer = time.AfterFunc(time.Duration(timerInterval)*time.Second, retryFunc)
 
 	return
 }
@@ -201,7 +206,7 @@ func (c *client) resetRetryTimer() {
 	c.retryTimer = nil
 }
 
-func (c *client) retryDelivery() {
+func (c *client) retryDelivery(ctx context.Context, cancel context.CancelFunc) {
 	c.resetRetryTimer()
 	c.inflightMu.RLock()
 	ilen := len(c.inflight)
@@ -225,7 +230,7 @@ func (c *client) retryDelivery() {
 		age := now - infEle.timestamp
 		if age >= retryInterval {
 			if infEle.status == Publish {
-				fail := c.WriterPacket(infEle.packet)
+				fail := c.WriterPacket(infEle.packet, ctx, cancel)
 				if fail != nil {
 					log.Error("failed to deliver PUBLISH (qos 2)", zap.String("ClientID", c.info.clientID))
 					continue
@@ -234,7 +239,7 @@ func (c *client) retryDelivery() {
 			} else if infEle.status == PubRel {
 				pubrel := packets.NewControlPacket(packets.Pubrel).(*packets.PubrelPacket)
 				pubrel.MessageID = infEle.packet.MessageID
-				fail := c.WriterPacket(pubrel)
+				fail := c.WriterPacket(pubrel, ctx, cancel)
 				if fail != nil {
 					log.Error("failed to deliver PUBREL packet", zap.String("ClientID", c.info.clientID))
 					continue
@@ -245,8 +250,8 @@ func (c *client) retryDelivery() {
 			if age < 0 {
 				age = 0
 			}
-			c.ensureRetryTimer(retryInterval - age)
+			c.ensureRetryTimer(ctx, cancel, retryInterval-age)
 		}
 	}
-	c.ensureRetryTimer()
+	c.ensureRetryTimer(ctx, cancel)
 }

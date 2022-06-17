@@ -74,8 +74,6 @@ type client struct {
 	info           info
 	route          route
 	status         int
-	ctx            context.Context
-	cancelFunc     context.CancelFunc
 	session        *sessions.Session
 	subMap         map[string]*subscription
 	subMapMu       sync.RWMutex
@@ -148,7 +146,6 @@ func (c *client) init() {
 		ws := c.conn.(*websocket.Conn)
 		c.info.remoteIP, _, _ = net.SplitHostPort(ws.Request().RemoteAddr)
 	}
-	c.ctx, c.cancelFunc = context.WithCancel(context.Background())
 	c.subMap = make(map[string]*subscription)
 	c.topicsMgr = c.broker.topicsMgr
 	c.routeSubMap = make(map[string]uint64)
@@ -157,7 +154,7 @@ func (c *client) init() {
 	c.mqueue = queue.New()
 }
 
-func (c *client) readLoop() {
+func (c *client) readLoop(ctx context.Context, cancel context.CancelFunc) {
 	netConn := c.conn
 	broker := c.broker
 
@@ -172,7 +169,7 @@ func (c *client) readLoop() {
 
 	for {
 
-		var readFromClient = func(ctx context.Context) {
+		var readFromClient = func(ctx context.Context, cancel context.CancelFunc) {
 			//add read timeout
 			if keepAlive > 0 {
 				if err := netConn.SetReadDeadline(time.Now().Add(timeOut)); err != nil {
@@ -181,7 +178,7 @@ func (c *client) readLoop() {
 						client: c,
 						packet: DisconnectedPacket,
 					}
-					broker.SubmitWork(c.info.clientID, msg)
+					broker.SubmitWork(c.info.clientID, msg, ctx, cancel)
 					return
 				}
 			}
@@ -199,7 +196,7 @@ func (c *client) readLoop() {
 					packet: DisconnectedPacket,
 				}
 
-				broker.SubmitWork(c.info.clientID, msg)
+				broker.SubmitWork(c.info.clientID, msg, ctx, cancel)
 				return
 			}
 
@@ -211,26 +208,27 @@ func (c *client) readLoop() {
 				 */
 				if !discPacket.IsValid() {
 					c.info.willMsg = nil
-					c.Close()
+					c.Close(ctx, cancel)
 					log.Error("client forced to disconnect due to malformed packet", zap.String("ClientID", c.info.clientID))
 					return
 				}
 
+				log.Info("client exited cleanly", zap.String("ClientID", c.info.clientID))
 				c.info.willMsg = nil
-				c.cancelFunc()
+				cancel()
 			}
 
 			msg := CreateNewMessage(c, packet)
 
 			// Send message to thread pool
-			broker.SubmitWork(c.info.clientID, msg)
+			broker.SubmitWork(c.info.clientID, msg, ctx, cancel)
 		}
 
-		readFromClient(c.ctx)
-
 		select {
-		case <-c.ctx.Done():
+		case <-ctx.Done():
 			return
+		default:
+			readFromClient(ctx, cancel)
 		}
 	}
 
@@ -296,7 +294,7 @@ func validatePacketFields(msgPacket packets.ControlPacket) (validFields bool) {
 }
 
 // ProcessClientMessage  handles a packet sent from client to server
-func ProcessClientMessage(msg *Message) {
+func ProcessClientMessage(msg *Message, ctx context.Context, cancel context.CancelFunc) {
 	c := msg.client
 	clientPacket := msg.packet
 
@@ -314,7 +312,7 @@ func ProcessClientMessage(msg *Message) {
 	case *packets.ConnectPacket:
 	case *packets.PublishPacket:
 		packet := clientPacket.(*packets.PublishPacket)
-		c.ProcessPublish(packet)
+		c.ProcessPublish(packet, ctx, cancel)
 	case *packets.PubackPacket:
 		packet := clientPacket.(*packets.PubackPacket)
 		c.processPubAck(packet)
@@ -336,7 +334,7 @@ func ProcessClientMessage(msg *Message) {
 
 		pubrel := packets.NewControlPacket(packets.Pubrel).(*packets.PubrelPacket)
 		pubrel.MessageID = packet.MessageID
-		if err := c.WriterPacket(pubrel); err != nil {
+		if err := c.WriterPacket(pubrel, ctx, cancel); err != nil {
 			log.Error("send pubrel error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 			return
 		}
@@ -345,7 +343,7 @@ func ProcessClientMessage(msg *Message) {
 		_ = c.pubRel(packet.MessageID)
 		pubcomp := packets.NewControlPacket(packets.Pubcomp).(*packets.PubcompPacket)
 		pubcomp.MessageID = packet.MessageID
-		if err := c.WriterPacket(pubcomp); err != nil {
+		if err := c.WriterPacket(pubcomp, ctx, cancel); err != nil {
 			log.Error("send pubcomp error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 			return
 		}
@@ -356,29 +354,29 @@ func ProcessClientMessage(msg *Message) {
 		c.inflightMu.Unlock()
 	case *packets.SubscribePacket:
 		packet := clientPacket.(*packets.SubscribePacket)
-		c.ProcessSubscribe(packet)
+		c.ProcessSubscribe(packet, ctx, cancel)
 	case *packets.SubackPacket:
 	case *packets.UnsubscribePacket:
 		packet := clientPacket.(*packets.UnsubscribePacket)
-		c.ProcessUnSubscribe(packet)
+		c.ProcessUnSubscribe(packet, ctx, cancel)
 	case *packets.UnsubackPacket:
 	case *packets.PingreqPacket:
-		c.ProcessPing()
+		c.ProcessPing(ctx, cancel)
 	case *packets.PingrespPacket:
 	case *packets.DisconnectPacket:
-		c.Close()
+		c.Close(ctx, cancel)
 
 	default:
 		log.Info("Recv Unknow message.......", zap.String("ClientID", c.info.clientID))
 	}
 }
 
-func (c *client) ProcessPublish(packet *packets.PublishPacket) {
+func (c *client) ProcessPublish(packet *packets.PublishPacket, ctx context.Context, cancel context.CancelFunc) {
 	switch c.category {
 	case CLIENT:
-		c.processClientPublish(packet)
+		c.processClientPublish(packet, ctx, cancel)
 	case ROUTER:
-		c.processRouterPublish(packet)
+		c.processRouterPublish(packet, ctx, cancel)
 	case CLUSTER:
 		c.processRemotePublish(packet)
 	}
@@ -398,22 +396,22 @@ func (c *client) processRemotePublish(packet *packets.PublishPacket) {
 
 }
 
-func (c *client) processRouterPublish(packet *packets.PublishPacket) {
+func (c *client) processRouterPublish(packet *packets.PublishPacket, ctx context.Context, cancel context.CancelFunc) {
 	if c.status == Disconnected {
 		return
 	}
 
 	switch packet.Qos {
 	case QosAtMostOnce:
-		c.ProcessPublishMessage(packet)
+		c.ProcessPublishMessage(packet, ctx, cancel)
 	case QosAtLeastOnce:
 		puback := packets.NewControlPacket(packets.Puback).(*packets.PubackPacket)
 		puback.MessageID = packet.MessageID
-		if err := c.WriterPacket(puback); err != nil {
+		if err := c.WriterPacket(puback, ctx, cancel); err != nil {
 			log.Error("send puback error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 			return
 		}
-		c.ProcessPublishMessage(packet)
+		c.ProcessPublishMessage(packet, ctx, cancel)
 	case QosExactlyOnce:
 		return
 	default:
@@ -423,7 +421,7 @@ func (c *client) processRouterPublish(packet *packets.PublishPacket) {
 
 }
 
-func (c *client) processClientPublish(packet *packets.PublishPacket) {
+func (c *client) processClientPublish(packet *packets.PublishPacket, ctx context.Context, cancel context.CancelFunc) {
 
 	topic := packet.TopicName
 
@@ -448,26 +446,26 @@ func (c *client) processClientPublish(packet *packets.PublishPacket) {
 
 	switch packet.Qos {
 	case QosAtMostOnce:
-		c.ProcessPublishMessage(packet)
+		c.ProcessPublishMessage(packet, ctx, cancel)
 	case QosAtLeastOnce:
 		puback := packets.NewControlPacket(packets.Puback).(*packets.PubackPacket)
 		puback.MessageID = packet.MessageID
-		if err := c.WriterPacket(puback); err != nil {
+		if err := c.WriterPacket(puback, ctx, cancel); err != nil {
 			log.Error("send puback error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 			return
 		}
-		c.ProcessPublishMessage(packet)
+		c.ProcessPublishMessage(packet, ctx, cancel)
 	case QosExactlyOnce:
 		if err := c.registerPublishPacketId(packet.MessageID); err != nil {
 			return
 		} else {
 			pubrec := packets.NewControlPacket(packets.Pubrec).(*packets.PubrecPacket)
 			pubrec.MessageID = packet.MessageID
-			if err := c.WriterPacket(pubrec); err != nil {
+			if err := c.WriterPacket(pubrec, ctx, cancel); err != nil {
 				log.Error("send pubrec error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 				return
 			}
-			c.ProcessPublishMessage(packet)
+			c.ProcessPublishMessage(packet, ctx, cancel)
 		}
 
 		return
@@ -484,7 +482,7 @@ func (c *client) processPubAck(packet *packets.PubackPacket) {
 	delete(c.inflight, packet.MessageID)
 }
 
-func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) {
+func (c *client) ProcessPublishMessage(packet *packets.PublishPacket, ctx context.Context, cancel context.CancelFunc) {
 
 	broker := c.broker
 	if broker == nil {
@@ -524,7 +522,7 @@ func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) {
 			if s.share {
 				subscribersQoS = append(subscribersQoS, i)
 			} else {
-				publishToSubscribers(s, packet)
+				publishToSubscribers(s, packet, ctx, cancel)
 			}
 		}
 	}
@@ -532,23 +530,23 @@ func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) {
 	if len(subscribersQoS) > 0 {
 		index := r.Intn(len(subscribersQoS))
 		sub := c.subs[subscribersQoS[index]].(*subscription)
-		publishToSubscribers(sub, packet)
+		publishToSubscribers(sub, packet, ctx, cancel)
 	}
 
 }
 
-func (c *client) ProcessSubscribe(packet *packets.SubscribePacket) {
+func (c *client) ProcessSubscribe(packet *packets.SubscribePacket, ctx context.Context, cancel context.CancelFunc) {
 	switch c.category {
 	case CLIENT:
-		c.processClientSubscribe(packet)
+		c.processClientSubscribe(packet, ctx, cancel)
 	case ROUTER:
 		fallthrough
 	case REMOTE:
-		c.processRouterSubscribe(packet)
+		c.processRouterSubscribe(packet, ctx, cancel)
 	}
 }
 
-func (c *client) processClientSubscribe(packet *packets.SubscribePacket) {
+func (c *client) processClientSubscribe(packet *packets.SubscribePacket, ctx context.Context, cancel context.CancelFunc) {
 	if c.status == Disconnected {
 		return
 	}
@@ -628,7 +626,7 @@ func (c *client) processClientSubscribe(packet *packets.SubscribePacket) {
 
 	suback.ReturnCodes = retcodes
 
-	err := c.WriterPacket(suback)
+	err := c.WriterPacket(suback, ctx, cancel)
 	if err != nil {
 		log.Error("send suback error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 		return
@@ -639,7 +637,7 @@ func (c *client) processClientSubscribe(packet *packets.SubscribePacket) {
 
 	//process retain message
 	for _, rm := range c.rmsgs {
-		if err := c.WriterPacket(rm); err != nil {
+		if err := c.WriterPacket(rm, ctx, cancel); err != nil {
 			log.Error("Error publishing retained message:", zap.Any("err", err), zap.String("ClientID", c.info.clientID))
 		} else {
 			log.Info("process retain  message: ", zap.Any("packet", packet), zap.String("ClientID", c.info.clientID))
@@ -647,7 +645,7 @@ func (c *client) processClientSubscribe(packet *packets.SubscribePacket) {
 	}
 }
 
-func (c *client) processRouterSubscribe(packet *packets.SubscribePacket) {
+func (c *client) processRouterSubscribe(packet *packets.SubscribePacket, ctx context.Context, cancel context.CancelFunc) {
 	if c.status == Disconnected {
 		return
 	}
@@ -706,23 +704,23 @@ func (c *client) processRouterSubscribe(packet *packets.SubscribePacket) {
 
 	suback.ReturnCodes = retcodes
 
-	err := c.WriterPacket(suback)
+	err := c.WriterPacket(suback, ctx, cancel)
 	if err != nil {
 		log.Error("send suback error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 		return
 	}
 }
 
-func (c *client) ProcessUnSubscribe(packet *packets.UnsubscribePacket) {
+func (c *client) ProcessUnSubscribe(packet *packets.UnsubscribePacket, ctx context.Context, cancel context.CancelFunc) {
 	switch c.category {
 	case CLIENT:
-		c.processClientUnSubscribe(packet)
+		c.processClientUnSubscribe(packet, ctx, cancel)
 	case ROUTER:
-		c.processRouterUnSubscribe(packet)
+		c.processRouterUnSubscribe(packet, ctx, cancel)
 	}
 }
 
-func (c *client) processRouterUnSubscribe(packet *packets.UnsubscribePacket) {
+func (c *client) processRouterUnSubscribe(packet *packets.UnsubscribePacket, ctx context.Context, cancel context.CancelFunc) {
 	if c.status == Disconnected {
 		return
 	}
@@ -753,14 +751,14 @@ func (c *client) processRouterUnSubscribe(packet *packets.UnsubscribePacket) {
 	unsuback := packets.NewControlPacket(packets.Unsuback).(*packets.UnsubackPacket)
 	unsuback.MessageID = packet.MessageID
 
-	err := c.WriterPacket(unsuback)
+	err := c.WriterPacket(unsuback, ctx, cancel)
 	if err != nil {
 		log.Error("send unsuback error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 		return
 	}
 }
 
-func (c *client) processClientUnSubscribe(packet *packets.UnsubscribePacket) {
+func (c *client) processClientUnSubscribe(packet *packets.UnsubscribePacket, ctx context.Context, cancel context.CancelFunc) {
 	if c.status == Disconnected {
 		return
 	}
@@ -799,7 +797,7 @@ func (c *client) processClientUnSubscribe(packet *packets.UnsubscribePacket) {
 	unsuback := packets.NewControlPacket(packets.Unsuback).(*packets.UnsubackPacket)
 	unsuback.MessageID = packet.MessageID
 
-	err := c.WriterPacket(unsuback)
+	err := c.WriterPacket(unsuback, ctx, cancel)
 	if err != nil {
 		log.Error("send unsuback error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 		return
@@ -808,21 +806,21 @@ func (c *client) processClientUnSubscribe(packet *packets.UnsubscribePacket) {
 	b.BroadcastSubOrUnsubMessage(packet)
 }
 
-func (c *client) ProcessPing() {
+func (c *client) ProcessPing(ctx context.Context, cancel context.CancelFunc) {
 	if c.status == Disconnected {
 		return
 	}
 	resp := packets.NewControlPacket(packets.Pingresp).(*packets.PingrespPacket)
-	err := c.WriterPacket(resp)
+	err := c.WriterPacket(resp, ctx, cancel)
 	if err != nil {
 		log.Error("send PingResponse error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 		return
 	}
 }
 
-func (c *client) Close() {
+func (c *client) Close(ctx context.Context, cancelFunc context.CancelFunc) {
 
-	c.cancelFunc()
+	cancelFunc()
 
 	if c.status == Disconnected {
 		return
@@ -888,7 +886,7 @@ func (c *client) Close() {
 
 }
 
-func (c *client) WriterPacket(packet packets.ControlPacket) error {
+func (c *client) WriterPacket(packet packets.ControlPacket, ctx context.Context, cancel context.CancelFunc) error {
 	defer func() {
 		if err := recover(); err != nil {
 			log.Error("recover error, ", zap.Any("recover", r))
@@ -902,7 +900,7 @@ func (c *client) WriterPacket(packet packets.ControlPacket) error {
 		return nil
 	}
 	if c.conn == nil {
-		c.Close()
+		c.Close(ctx, cancel)
 		return errors.New("connect lost ....")
 	}
 

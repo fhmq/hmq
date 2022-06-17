@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"net"
@@ -139,7 +140,7 @@ func NewBroker(config *Config) (*Broker, error) {
 	return b, nil
 }
 
-func (broker *Broker) SubmitWork(clientId string, msg *Message) {
+func (broker *Broker) SubmitWork(clientId string, msg *Message, ctx context.Context, cancel context.CancelFunc) {
 	if broker.wpool == nil {
 		broker.wpool = pool.New(broker.config.Worker)
 	}
@@ -150,7 +151,7 @@ func (broker *Broker) SubmitWork(clientId string, msg *Message) {
 
 		// creates function
 		handleMessage := func() {
-			ProcessClientMessage(msg)
+			ProcessClientMessage(msg, ctx, cancel)
 		}
 
 		// Submit the client to worker pool
@@ -354,7 +355,7 @@ func (broker *Broker) DisConnClientByClientId(clientId string) {
 	if !success {
 		return
 	}
-	conn.Close()
+	conn.Close(context.WithCancel(context.Background()))
 }
 
 func (broker *Broker) handleConnection(clientType int, conn net.Conn) {
@@ -450,7 +451,7 @@ func (broker *Broker) handleConnection(clientType int, conn net.Conn) {
 		if exists {
 			if ol, ok := old.(*client); ok {
 				log.Warn("client exists, close old client", getAdditionalLogFields(ol.info.clientID, ol.conn)...)
-				ol.Close()
+				ol.Close(context.WithCancel(context.Background()))
 			}
 		}
 
@@ -472,14 +473,14 @@ func (broker *Broker) handleConnection(clientType int, conn net.Conn) {
 		if exists {
 			if ol, ok := old.(*client); ok {
 				log.Warn("router exists, close old router", getAdditionalLogFields(ol.info.clientID, ol.conn)...)
-				ol.Close()
+				ol.Close(context.WithCancel(context.Background()))
 			}
 		}
 		broker.routes.Store(cid, clientInstance)
 	}
 
 	// start reading loop
-	clientInstance.readLoop()
+	clientInstance.readLoop(context.WithCancel(context.Background()))
 }
 
 func (broker *Broker) ConnectToDiscovery() {
@@ -523,11 +524,11 @@ func (broker *Broker) ConnectToDiscovery() {
 
 	c.init()
 
-	c.SendConnect()
-	c.SendInfo()
+	c.SendConnect(context.WithCancel(context.Background()))
+	c.SendInfo(context.WithCancel(context.Background()))
 
-	go c.readLoop()
-	go c.StartPing()
+	go c.readLoop(context.WithCancel(context.Background()))
+	go c.StartPing(context.WithCancel(context.Background()))
 }
 
 func (broker *Broker) processClusterInfo() {
@@ -537,7 +538,9 @@ func (broker *Broker) processClusterInfo() {
 			log.Error("read message from cluster channel error")
 			return
 		}
-		ProcessClientMessage(msg)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		ProcessClientMessage(msg, ctx, cancel)
 	}
 
 }
@@ -600,10 +603,10 @@ func (broker *Broker) connectRouter(id, addr string) {
 	c.init()
 	broker.remotes.Store(cid, c)
 
-	c.SendConnect()
+	c.SendConnect(context.WithCancel(context.Background()))
 
-	go c.readLoop()
-	go c.StartPing()
+	go c.readLoop(context.WithCancel(context.Background()))
+	go c.StartPing(context.WithCancel(context.Background()))
 
 }
 
@@ -665,7 +668,8 @@ func (broker *Broker) SendLocalSubsToRouter(c *client) {
 		return true
 	})
 	if len(subInfo.Topics) > 0 {
-		if err := c.WriterPacket(subInfo); err != nil {
+		ctx, cancel := context.WithCancel(context.Background())
+		if err := c.WriterPacket(subInfo, ctx, cancel); err != nil {
 			log.Error("Send localsubs To Router error", zap.Error(err))
 		}
 	}
@@ -677,7 +681,8 @@ func (broker *Broker) BroadcastInfoMessage(remoteID string, msg *packets.Publish
 			if r.route.remoteID == remoteID {
 				return true
 			}
-			r.WriterPacket(msg)
+			ctx, cancel := context.WithCancel(context.Background())
+			r.WriterPacket(msg, ctx, cancel)
 		}
 		return true
 	})
@@ -687,7 +692,8 @@ func (broker *Broker) BroadcastSubOrUnsubMessage(packet packets.ControlPacket) {
 
 	broker.routes.Range(func(key, value interface{}) bool {
 		if r, ok := value.(*client); ok {
-			r.WriterPacket(packet)
+			ctx, cancel := context.WithCancel(context.Background())
+			r.WriterPacket(packet, ctx, cancel)
 		}
 		return true
 	})
@@ -721,7 +727,8 @@ func (broker *Broker) PublishMessage(packet *packets.PublishPacket) {
 	for _, sub := range subs {
 		s, ok := sub.(*subscription)
 		if ok {
-			if err := s.client.WriterPacket(packet); err != nil {
+			ctx, cancel := context.WithCancel(context.Background())
+			if err := s.client.WriterPacket(packet, ctx, cancel); err != nil {
 				log.Error("write message error", zap.Error(err))
 			}
 		}
@@ -737,7 +744,9 @@ func (broker *Broker) PublishMessageByClientId(packet *packets.PublishPacket, cl
 	if !success {
 		return fmt.Errorf("clientId %s loaded fail", clientId)
 	}
-	return conn.WriterPacket(packet)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	return conn.WriterPacket(packet, ctx, cancel)
 }
 
 func (broker *Broker) BroadcastUnSubscribe(topicsToUnSubscribeFrom []string) {
@@ -766,11 +775,11 @@ func (broker *Broker) generateWillMsg(packet *packets.ConnectPacket) (will *pack
 
 	if packet.WillFlag {
 		willMsg = packets.NewControlPacket(packets.Publish).(*packets.PublishPacket)
-		willMsg.Qos = msg.WillQos
-		willMsg.TopicName = msg.WillTopic
-		willMsg.Retain = msg.WillRetain
-		willMsg.Payload = msg.WillMessage
-		willMsg.Dup = msg.Dup
+		willMsg.Qos = packet.WillQos
+		willMsg.TopicName = packet.WillTopic
+		willMsg.Retain = packet.WillRetain
+		willMsg.Payload = packet.WillMessage
+		willMsg.Dup = packet.Dup
 	}
 
 	return willMsg
@@ -797,7 +806,7 @@ func (broker *Broker) processConnect(packet *packets.ConnectPacket, conn net.Con
 
 		// Send packet back to client
 		if err := conNack.Write(conn); err != nil {
-			log.Error(ERR_SEND_CONNACK, getAdditionalLogFields(msg.ClientIdentifier, conn, zap.Error(err))...)
+			log.Error(ERR_SEND_CONNACK, getAdditionalLogFields(packet.ClientIdentifier, conn, zap.Error(err))...)
 		}
 
 		return nil
@@ -813,14 +822,15 @@ func (broker *Broker) processConnect(packet *packets.ConnectPacket, conn net.Con
 		}()
 
 		if err := conNack.Write(conn); err != nil {
-			log.Error(ERR_SEND_CONNACK, getAdditionalLogFields(msg.ClientIdentifier, conn, zap.Error(err))...)
+			log.Error(ERR_SEND_CONNACK, getAdditionalLogFields(packet.ClientIdentifier, conn, zap.Error(err))...)
 		}
 
 		return nil
 	}
 
+	// Send connack back to client
 	if err := conNack.Write(conn); err != nil {
-		log.Error(ERR_SEND_CONNACK, getAdditionalLogFields(msg.ClientIdentifier, conn, zap.Error(err))...)
+		log.Error(ERR_SEND_CONNACK, getAdditionalLogFields(packet.ClientIdentifier, conn, zap.Error(err))...)
 		return nil
 	}
 

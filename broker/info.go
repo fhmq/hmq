@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -10,38 +11,40 @@ import (
 	"go.uber.org/zap"
 )
 
-func (c *client) SendInfo() {
+// SendInfo sends information of current client to a broker in cluster
+func (c *client) SendInfo(ctx context.Context, cancel context.CancelFunc) {
 	if c.status == Disconnected {
 		return
 	}
 	url := c.info.localIP + ":" + c.broker.config.Cluster.Port
 
 	infoMsg := NewInfo(c.broker.id, url)
-	err := c.WriterPacket(infoMsg)
+	err := c.WriterPacket(infoMsg, ctx, cancel)
 	if err != nil {
 		log.Error("send info message error, ", zap.Error(err))
 		return
 	}
 }
 
-func (c *client) StartPing() {
+func (c *client) StartPing(ctx context.Context, cancel context.CancelFunc) {
 	timeTicker := time.NewTicker(time.Second * 50)
 	ping := packets.NewControlPacket(packets.Pingreq).(*packets.PingreqPacket)
 	for {
 		select {
 		case <-timeTicker.C:
-			err := c.WriterPacket(ping)
+			err := c.WriterPacket(ping, ctx, cancel)
 			if err != nil {
 				log.Error("ping error: ", zap.Error(err))
-				c.Close()
+				c.Close(ctx, cancel)
 			}
-		case <-c.ctx.Done():
+		case <-ctx.Done():
 			return
 		}
 	}
 }
 
-func (c *client) SendConnect() {
+// SendConnect sends a connect packet
+func (c *client) SendConnect(ctx context.Context, cancel context.CancelFunc) {
 
 	if c.status != Connected {
 		return
@@ -53,7 +56,7 @@ func (c *client) SendConnect() {
 	m.CleanSession = true
 	m.ClientIdentifier = c.info.clientID
 	m.Keepalive = uint16(60)
-	err := c.WriterPacket(m)
+	err := c.WriterPacket(m, ctx, cancel)
 	if err != nil {
 		log.Error("send connect message error, ", zap.Error(err))
 		return
