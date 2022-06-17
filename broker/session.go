@@ -2,7 +2,7 @@ package broker
 
 import "hmq/broker/packets"
 
-func (b *Broker) getSession(cli *client, req *packets.ConnectPacket, resp *packets.ConnackPacket) error {
+func (broker *Broker) getSession(cli *client, req *packets.ConnectPacket, resp *packets.ConnackPacket) error {
 	// If CleanSession is set to 0, the server MUST resume communications with the
 	// client based on state from the current session, as identified by the client
 	// identifier. If there is no session associated with the client identifier the
@@ -27,7 +27,7 @@ func (b *Broker) getSession(cli *client, req *packets.ConnectPacket, resp *packe
 	// If CleanSession is NOT set, check the session store for existing session.
 	// If found, return it.
 	if !req.CleanSession {
-		if cli.session, err = b.sessionMgr.Get(cid); err == nil {
+		if cli.session, err = broker.sessionMgr.Get(cid); err == nil {
 			resp.SessionPresent = true
 
 			if err := cli.session.Update(req); err != nil {
@@ -38,7 +38,7 @@ func (b *Broker) getSession(cli *client, req *packets.ConnectPacket, resp *packe
 
 	// If CleanSession, or no existing session found, then create a new one
 	if cli.session == nil {
-		if cli.session, err = b.sessionMgr.New(cid); err != nil {
+		if cli.session, err = broker.sessionMgr.New(cid); err != nil {
 			return err
 		}
 

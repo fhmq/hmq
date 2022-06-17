@@ -59,18 +59,18 @@ func CreateNewMessage(client *client, packet packets.ControlPacket) (msg *Messag
 }
 
 func newMessagePool() []chan *Message {
-	pool := make([]chan *Message, 0)
+	msgPool := make([]chan *Message, 0)
 	for i := 0; i < MessagePoolNum; i++ {
 		ch := make(chan *Message, MessagePoolMessageNum)
-		pool = append(pool, ch)
+		msgPool = append(msgPool, ch)
 	}
-	return pool
+	return msgPool
 }
 
 func getAdditionalLogFields(clientIdentifier string, conn net.Conn, additionalFields ...zapcore.Field) []zapcore.Field {
 	var wsConn *websocket.Conn = nil
 	var wsEnabled bool
-	result := []zapcore.Field{}
+	var result []zapcore.Field
 
 	switch conn.(type) {
 	case *websocket.Conn:
@@ -158,54 +158,54 @@ func (broker *Broker) SubmitWork(clientId string, msg *Message) {
 	}
 }
 
-func (b *Broker) Start() {
-	if b == nil {
+func (broker *Broker) Start() {
+	if broker == nil {
 		log.Error("broker is null")
 		return
 	}
 
-	if b.config.HTTPPort != "" {
-		go InitHTTPMoniter(b)
+	if broker.config.HTTPPort != "" {
+		go InitHTTPMoniter(broker)
 	}
 
 	//listen client over tcp
-	if b.config.Port != "" {
-		go b.StartClientListening(false)
+	if broker.config.Port != "" {
+		go broker.StartClientListening(false)
 	}
 
 	//listen for cluster
-	if b.config.Cluster.Port != "" {
-		go b.StartClusterListening()
+	if broker.config.Cluster.Port != "" {
+		go broker.StartClusterListening()
 	}
 
 	//listen for websocket
-	if b.config.WsPort != "" {
-		go b.StartWebsocketListening()
+	if broker.config.WsPort != "" {
+		go broker.StartWebsocketListening()
 	}
 
 	//listen client over tls
-	if b.config.TlsPort != "" {
-		go b.StartClientListening(true)
+	if broker.config.TlsPort != "" {
+		go broker.StartClientListening(true)
 	}
 
 	//connect on other node in cluster
-	if b.config.Router != "" {
-		go b.processClusterInfo()
-		b.ConnectToDiscovery()
+	if broker.config.Router != "" {
+		go broker.processClusterInfo()
+		broker.ConnectToDiscovery()
 	}
 
 }
 
-func (b *Broker) StartWebsocketListening() {
-	path := b.config.WsPath
-	hp := ":" + b.config.WsPort
+func (broker *Broker) StartWebsocketListening() {
+	path := broker.config.WsPath
+	hp := ":" + broker.config.WsPort
 	log.Info("Start Websocket Listener on:", zap.String("hp", hp), zap.String("path", path))
-	ws := &websocket.Server{Handler: websocket.Handler(b.wsHandler)}
+	ws := &websocket.Server{Handler: websocket.Handler(broker.wsHandler)}
 	mux := http.NewServeMux()
 	mux.Handle(path, ws)
 	var err error
-	if b.config.WsTLS {
-		err = http.ListenAndServeTLS(hp, b.config.TlsInfo.CertFile, b.config.TlsInfo.KeyFile, mux)
+	if broker.config.WsTLS {
+		err = http.ListenAndServeTLS(hp, broker.config.TlsInfo.CertFile, broker.config.TlsInfo.KeyFile, mux)
 	} else {
 		err = http.ListenAndServe(hp, mux)
 	}
@@ -215,24 +215,24 @@ func (b *Broker) StartWebsocketListening() {
 	}
 }
 
-func (b *Broker) wsHandler(ws *websocket.Conn) {
+func (broker *Broker) wsHandler(ws *websocket.Conn) {
 	// io.Copy(ws, ws)
 	ws.PayloadType = websocket.BinaryFrame
-	b.handleConnection(CLIENT, ws)
+	broker.handleConnection(CLIENT, ws)
 }
 
 // startSecureListener starts a TCP listener with TLS enabled
-func (b *Broker) startSecureListener() (l net.Listener, err error) {
-	hp := b.config.TlsHost + ":" + b.config.TlsPort
-	l, err = tls.Listen("tcp", hp, b.tlsConfig)
+func (broker *Broker) startSecureListener() (l net.Listener, err error) {
+	hp := broker.config.TlsHost + ":" + broker.config.TlsPort
+	l, err = tls.Listen("tcp", hp, broker.tlsConfig)
 	log.Info("Start TLS Listening client on ", zap.String("hp", hp))
 
 	return l, err
 }
 
 // startInsecureListener starts a TCP listener without TLS enabled
-func (b *Broker) startInsecureListener() (l net.Listener, err error) {
-	hp := b.config.Host + ":" + b.config.Port
+func (broker *Broker) startInsecureListener() (l net.Listener, err error) {
+	hp := broker.config.Host + ":" + broker.config.Port
 	l, err = net.Listen("tcp", hp)
 	log.Info("Start Listening client on ", zap.String("hp", hp))
 
@@ -268,7 +268,7 @@ func handleAcceptError(delay time.Duration, err error) (bShouldContinue bool) {
 	return
 }
 
-func (b *Broker) StartClientListening(Tls bool) {
+func (broker *Broker) StartClientListening(Tls bool) {
 	var err error
 	var l net.Listener
 
@@ -278,9 +278,9 @@ func (b *Broker) StartClientListening(Tls bool) {
 
 	for {
 		if Tls {
-			l, err = b.startSecureListener()
+			l, err = broker.startSecureListener()
 		} else {
-			l, err = b.startInsecureListener()
+			l, err = broker.startInsecureListener()
 		}
 
 		if err == nil {
@@ -304,12 +304,12 @@ func (b *Broker) StartClientListening(Tls bool) {
 		tmpDelay = ACCEPT_MIN_SLEEP
 
 		// Starts connection handling
-		go b.handleConnection(CLIENT, conn)
+		go broker.handleConnection(CLIENT, conn)
 	}
 }
 
-func (b *Broker) StartClusterListening() {
-	var hp string = b.config.Cluster.Host + ":" + b.config.Cluster.Port
+func (broker *Broker) StartClusterListening() {
+	var hp string = broker.config.Cluster.Host + ":" + broker.config.Cluster.Port
 	log.Info("Start Listening cluster on ", zap.String("hp", hp))
 
 	l, e := net.Listen("tcp", hp)
@@ -341,12 +341,12 @@ func (b *Broker) StartClusterListening() {
 		}
 		tmpDelay = ACCEPT_MIN_SLEEP
 
-		go b.handleConnection(ROUTER, conn)
+		go broker.handleConnection(ROUTER, conn)
 	}
 }
 
-func (b *Broker) DisConnClientByClientId(clientId string) {
-	cli, loaded := b.clients.LoadAndDelete(clientId)
+func (broker *Broker) DisConnClientByClientId(clientId string) {
+	cli, loaded := broker.clients.LoadAndDelete(clientId)
 	if !loaded {
 		return
 	}
@@ -383,7 +383,7 @@ func (broker *Broker) handleConnection(clientType int, conn net.Conn) {
 		_ = conn.Close()
 
 		// Update client status
-		//c.status = Disconnected
+		//clientInstance.status = Disconnected
 
 		log.Error("Client disconnected due to malformed packet")
 
@@ -401,51 +401,16 @@ func (broker *Broker) handleConnection(clientType int, conn net.Conn) {
 		return
 	}
 
+	// Handles connect packet
+	conNack := broker.processConnect(msg, conn, clientType)
+	if conNack == nil {
+		return
+	}
+
 	log.Info("read connect from ", getAdditionalLogFields(msg.ClientIdentifier, conn)...)
 
-	// build CONNACK packet
-	connack := packets.NewControlPacket(packets.Connack).(*packets.ConnackPacket)
-	connack.SessionPresent = msg.CleanSession
-	connack.ReturnCode = msg.Validate()
-
-	// Check if packet have been validated
-	if connack.ReturnCode != packets.Accepted {
-		defer conn.Close()
-		if err := connack.Write(conn); err != nil {
-			log.Error(ERR_SEND_CONNACK, getAdditionalLogFields(msg.ClientIdentifier, conn, zap.Error(err))...)
-		}
-		return
-	}
-
-	// Handles authorization
-	if clientType == CLIENT &&
-		!broker.CheckConnectAuth(msg.ClientIdentifier, msg.Username, string(msg.Password)) {
-		connack.ReturnCode = packets.ErrRefusedNotAuthorised
-
-		defer conn.Close()
-		if err := connack.Write(conn); err != nil {
-			log.Error(ERR_SEND_CONNACK, getAdditionalLogFields(msg.ClientIdentifier, conn, zap.Error(err))...)
-		}
-
-		return
-	}
-
-	if err := connack.Write(conn); err != nil {
-		log.Error(ERR_SEND_CONNACK, getAdditionalLogFields(msg.ClientIdentifier, conn, zap.Error(err))...)
-		return
-	}
-
 	// Generates a new will message as needed
-	willmsg := packets.NewControlPacket(packets.Publish).(*packets.PublishPacket)
-	if msg.WillFlag {
-		willmsg.Qos = msg.WillQos
-		willmsg.TopicName = msg.WillTopic
-		willmsg.Retain = msg.WillRetain
-		willmsg.Payload = msg.WillMessage
-		willmsg.Dup = msg.Dup
-	} else {
-		willmsg = nil
-	}
+	willMsg := broker.generateWillMsg(msg)
 
 	// setup client information struct
 	info := info{
@@ -453,10 +418,10 @@ func (broker *Broker) handleConnection(clientType int, conn net.Conn) {
 		username:  msg.Username,
 		password:  msg.Password,
 		keepalive: msg.Keepalive,
-		willMsg:   willmsg,
+		willMsg:   willMsg,
 	}
 
-	c := &client{
+	clientInstance := &client{
 		category: clientType,
 		broker:   broker,
 		conn:     conn,
@@ -464,14 +429,15 @@ func (broker *Broker) handleConnection(clientType int, conn net.Conn) {
 	}
 
 	// Setup client
-	c.init()
+	clientInstance.init()
 
-	if err := broker.getSession(c, msg, connack); err != nil {
-		log.Error("get session error", getAdditionalLogFields(c.info.clientID, conn, zap.Error(err))...)
+	// checks if client needs to recover a previous session
+	if err := broker.getSession(clientInstance, msg, conNack); err != nil {
+		log.Error("get session error", getAdditionalLogFields(clientInstance.info.clientID, conn, zap.Error(err))...)
 		return
 	}
 
-	cid := c.info.clientID
+	cid := clientInstance.info.clientID
 
 	var exists bool
 	var old interface{}
@@ -488,7 +454,8 @@ func (broker *Broker) handleConnection(clientType int, conn net.Conn) {
 			}
 		}
 
-		broker.clients.Store(cid, c)
+		// Insert client into a list of connected clients
+		broker.clients.Store(cid, clientInstance)
 
 		// Updates client status
 		broker.OnlineOfflineNotification(cid, true)
@@ -508,19 +475,19 @@ func (broker *Broker) handleConnection(clientType int, conn net.Conn) {
 				ol.Close()
 			}
 		}
-		broker.routes.Store(cid, c)
+		broker.routes.Store(cid, clientInstance)
 	}
 
 	// start reading loop
-	c.readLoop()
+	clientInstance.readLoop()
 }
 
-func (b *Broker) ConnectToDiscovery() {
+func (broker *Broker) ConnectToDiscovery() {
 	var conn net.Conn
 	var err error
 	var tempDelay time.Duration = 0
 	for {
-		conn, err = net.Dial("tcp", b.config.Router)
+		conn, err = net.Dial("tcp", broker.config.Router)
 		if err != nil {
 			log.Error("Error trying to connect to route", zap.Error(err))
 			log.Debug("Connect to route timeout, retry...")
@@ -539,9 +506,9 @@ func (b *Broker) ConnectToDiscovery() {
 		}
 		break
 	}
-	log.Debug("connect to router success", zap.String("Router", b.config.Router))
+	log.Debug("connect to router success", zap.String("Router", broker.config.Router))
 
-	cid := b.id
+	cid := broker.id
 	info := info{
 		clientID:  cid,
 		keepalive: 60,
@@ -549,7 +516,7 @@ func (b *Broker) ConnectToDiscovery() {
 
 	c := &client{
 		category: CLUSTER,
-		broker:   b,
+		broker:   broker,
 		conn:     conn,
 		info:     info,
 	}
@@ -563,9 +530,9 @@ func (b *Broker) ConnectToDiscovery() {
 	go c.StartPing()
 }
 
-func (b *Broker) processClusterInfo() {
+func (broker *Broker) processClusterInfo() {
 	for {
-		msg, ok := <-b.clusterPool
+		msg, ok := <-broker.clusterPool
 		if !ok {
 			log.Error("read message from cluster channel error")
 			return
@@ -575,7 +542,7 @@ func (b *Broker) processClusterInfo() {
 
 }
 
-func (b *Broker) connectRouter(id, addr string) {
+func (broker *Broker) connectRouter(id, addr string) {
 	var conn net.Conn
 	var err error
 	var timeDelay time.Duration = 0
@@ -583,7 +550,7 @@ func (b *Broker) connectRouter(id, addr string) {
 	max := 32 * time.Second
 	for {
 
-		if !b.checkNodeExist(id, addr) {
+		if !broker.checkNodeExist(id, addr) {
 			return
 		}
 
@@ -624,14 +591,14 @@ func (b *Broker) connectRouter(id, addr string) {
 	}
 
 	c := &client{
-		broker:   b,
+		broker:   broker,
 		category: REMOTE,
 		conn:     conn,
 		route:    route,
 		info:     info,
 	}
 	c.init()
-	b.remotes.Store(cid, c)
+	broker.remotes.Store(cid, c)
 
 	c.SendConnect()
 
@@ -640,12 +607,12 @@ func (b *Broker) connectRouter(id, addr string) {
 
 }
 
-func (b *Broker) checkNodeExist(id, url string) bool {
-	if id == b.id {
+func (broker *Broker) checkNodeExist(id, url string) bool {
+	if id == broker.id {
 		return false
 	}
 
-	for k, v := range b.nodes {
+	for k, v := range broker.nodes {
 		if k == id {
 			return true
 		}
@@ -662,9 +629,9 @@ func (b *Broker) checkNodeExist(id, url string) bool {
 	return false
 }
 
-func (b *Broker) CheckRemoteExist(remoteID, url string) bool {
+func (broker *Broker) CheckRemoteExist(remoteID, url string) bool {
 	exists := false
-	b.remotes.Range(func(key, value interface{}) bool {
+	broker.remotes.Range(func(key, value interface{}) bool {
 		v, ok := value.(*client)
 		if ok {
 			if v.route.remoteUrl == url {
@@ -678,9 +645,9 @@ func (b *Broker) CheckRemoteExist(remoteID, url string) bool {
 	return exists
 }
 
-func (b *Broker) SendLocalSubsToRouter(c *client) {
+func (broker *Broker) SendLocalSubsToRouter(c *client) {
 	subInfo := packets.NewControlPacket(packets.Subscribe).(*packets.SubscribePacket)
-	b.clients.Range(func(key, value interface{}) bool {
+	broker.clients.Range(func(key, value interface{}) bool {
 		client, ok := value.(*client)
 		if !ok {
 			return true
@@ -704,8 +671,8 @@ func (b *Broker) SendLocalSubsToRouter(c *client) {
 	}
 }
 
-func (b *Broker) BroadcastInfoMessage(remoteID string, msg *packets.PublishPacket) {
-	b.routes.Range(func(key, value interface{}) bool {
+func (broker *Broker) BroadcastInfoMessage(remoteID string, msg *packets.PublishPacket) {
+	broker.routes.Range(func(key, value interface{}) bool {
 		if r, ok := value.(*client); ok {
 			if r.route.remoteID == remoteID {
 				return true
@@ -716,9 +683,9 @@ func (b *Broker) BroadcastInfoMessage(remoteID string, msg *packets.PublishPacke
 	})
 }
 
-func (b *Broker) BroadcastSubOrUnsubMessage(packet packets.ControlPacket) {
+func (broker *Broker) BroadcastSubOrUnsubMessage(packet packets.ControlPacket) {
 
-	b.routes.Range(func(key, value interface{}) bool {
+	broker.routes.Range(func(key, value interface{}) bool {
 		if r, ok := value.(*client); ok {
 			r.WriterPacket(packet)
 		}
@@ -726,26 +693,26 @@ func (b *Broker) BroadcastSubOrUnsubMessage(packet packets.ControlPacket) {
 	})
 }
 
-func (b *Broker) removeClient(c *client) {
+func (broker *Broker) removeClient(c *client) {
 	clientId := c.info.clientID
 	typ := c.category
 	switch typ {
 	case CLIENT:
-		b.clients.Delete(clientId)
+		broker.clients.Delete(clientId)
 	case ROUTER:
-		b.routes.Delete(clientId)
+		broker.routes.Delete(clientId)
 	case REMOTE:
-		b.remotes.Delete(clientId)
+		broker.remotes.Delete(clientId)
 	}
 }
 
-func (b *Broker) PublishMessage(packet *packets.PublishPacket) {
+func (broker *Broker) PublishMessage(packet *packets.PublishPacket) {
 	var subs []interface{}
 	var qoss []byte
 
-	b.mu.Lock()
-	err := b.topicsMgr.Subscribers([]byte(packet.TopicName), packet.Qos, &subs, &qoss)
-	b.mu.Unlock()
+	broker.mu.Lock()
+	err := broker.topicsMgr.Subscribers([]byte(packet.TopicName), packet.Qos, &subs, &qoss)
+	broker.mu.Unlock()
 	if err != nil {
 		log.Error("search sub client error", zap.Error(err))
 		return
@@ -761,8 +728,8 @@ func (b *Broker) PublishMessage(packet *packets.PublishPacket) {
 	}
 }
 
-func (b *Broker) PublishMessageByClientId(packet *packets.PublishPacket, clientId string) error {
-	cli, loaded := b.clients.LoadAndDelete(clientId)
+func (broker *Broker) PublishMessageByClientId(packet *packets.PublishPacket, clientId string) error {
+	cli, loaded := broker.clients.LoadAndDelete(clientId)
 	if !loaded {
 		return fmt.Errorf("clientId %s not connected", clientId)
 	}
@@ -773,22 +740,141 @@ func (b *Broker) PublishMessageByClientId(packet *packets.PublishPacket, clientI
 	return conn.WriterPacket(packet)
 }
 
-func (b *Broker) BroadcastUnSubscribe(topicsToUnSubscribeFrom []string) {
+func (broker *Broker) BroadcastUnSubscribe(topicsToUnSubscribeFrom []string) {
 	if len(topicsToUnSubscribeFrom) == 0 {
 		return
 	}
 
 	unsub := packets.NewControlPacket(packets.Unsubscribe).(*packets.UnsubscribePacket)
 	unsub.Topics = append(unsub.Topics, topicsToUnSubscribeFrom...)
-	b.BroadcastSubOrUnsubMessage(unsub)
+	broker.BroadcastSubOrUnsubMessage(unsub)
 }
 
 // OnlineOfflineNotification updates the online/offline status of a client
-func (b *Broker) OnlineOfflineNotification(clientID string, online bool) {
+func (broker *Broker) OnlineOfflineNotification(clientID string, online bool) {
 	packet := packets.NewControlPacket(packets.Publish).(*packets.PublishPacket)
 	packet.TopicName = "$SYS/broker/connection/clients/" + clientID
 	packet.Qos = 0
 	packet.Payload = []byte(fmt.Sprintf(`{"clientID":"%s","online":%v,"timestamp":"%s"}`, clientID, online, time.Now().UTC().Format(time.RFC3339)))
 
-	b.PublishMessage(packet)
+	broker.PublishMessage(packet)
+}
+
+// generateWillMsg
+func (broker *Broker) generateWillMsg(packet *packets.ConnectPacket) (will *packets.PublishPacket) {
+	var willMsg *packets.PublishPacket
+
+	if packet.WillFlag {
+		willMsg = packets.NewControlPacket(packets.Publish).(*packets.PublishPacket)
+		willMsg.Qos = msg.WillQos
+		willMsg.TopicName = msg.WillTopic
+		willMsg.Retain = msg.WillRetain
+		willMsg.Payload = msg.WillMessage
+		willMsg.Dup = msg.Dup
+	}
+
+	return willMsg
+}
+
+// processConnect handles connect packet and returns the built connack packet
+func (broker *Broker) processConnect(packet *packets.ConnectPacket, conn net.Conn, clientType int) (connAckPacket *packets.ConnackPacket) {
+
+	/*
+	* After a Network Connection is established by a Client to a Server, the first Packet
+	* sent from the Client to 365 the Server MUST be a CONNECT Packet
+	 */
+
+	// build CONNACK packet
+	conNack := packets.NewControlPacket(packets.Connack).(*packets.ConnackPacket)
+	conNack.SessionPresent = packet.CleanSession
+	conNack.ReturnCode = packet.Validate()
+
+	// Check if packet have been validated
+	if conNack.ReturnCode != packets.Accepted {
+		defer func() {
+			_ = conn.Close()
+		}()
+
+		// Send packet back to client
+		if err := conNack.Write(conn); err != nil {
+			log.Error(ERR_SEND_CONNACK, getAdditionalLogFields(msg.ClientIdentifier, conn, zap.Error(err))...)
+		}
+
+		return nil
+	}
+
+	// Handles authorization
+	if clientType == CLIENT &&
+		!broker.CheckConnectAuth(packet.ClientIdentifier, packet.Username, string(packet.Password)) {
+		conNack.ReturnCode = packets.ErrRefusedNotAuthorised
+
+		defer func() {
+			_ = conn.Close()
+		}()
+
+		if err := conNack.Write(conn); err != nil {
+			log.Error(ERR_SEND_CONNACK, getAdditionalLogFields(msg.ClientIdentifier, conn, zap.Error(err))...)
+		}
+
+		return nil
+	}
+
+	if err := conNack.Write(conn); err != nil {
+		log.Error(ERR_SEND_CONNACK, getAdditionalLogFields(msg.ClientIdentifier, conn, zap.Error(err))...)
+		return nil
+	}
+
+	return conNack
+}
+
+func (c *client) processConnack() {
+
+}
+
+func (c *client) processDisconnect() {
+
+}
+
+func (c *client) processPingReq() {
+
+}
+
+func (c *client) processPingResp() {
+
+}
+
+func (c *client) processPublish() {
+
+}
+
+func (c *client) processPuback() {
+
+}
+
+func (c *client) processPubcomp() {
+
+}
+
+func (c *client) processPubrec() {
+
+}
+
+func (c *client) processPubrel() {
+
+}
+
+func (c *client) processSubscribe() {
+
+}
+
+func (c *client) processSuback() {
+
+}
+
+func (c *client) processUnsubscribe() {
+
+}
+
+func (c *client) processUnsuback() {
+
 }

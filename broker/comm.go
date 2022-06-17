@@ -225,12 +225,20 @@ func (c *client) retryDelivery() {
 		age := now - infEle.timestamp
 		if age >= retryInterval {
 			if infEle.status == Publish {
-				c.WriterPacket(infEle.packet)
+				fail := c.WriterPacket(infEle.packet)
+				if fail != nil {
+					log.Error("failed to deliver PUBLISH (qos 2)", zap.String("ClientID", c.info.clientID))
+					continue
+				}
 				infEle.timestamp = now
-			} else if infEle.status == Pubrel {
+			} else if infEle.status == PubRel {
 				pubrel := packets.NewControlPacket(packets.Pubrel).(*packets.PubrelPacket)
 				pubrel.MessageID = infEle.packet.MessageID
-				c.WriterPacket(pubrel)
+				fail := c.WriterPacket(pubrel)
+				if fail != nil {
+					log.Error("failed to deliver PUBREL packet", zap.String("ClientID", c.info.clientID))
+					continue
+				}
 				infEle.timestamp = now
 			}
 		} else {

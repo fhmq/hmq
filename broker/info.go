@@ -64,7 +64,7 @@ func (c *client) SendConnect() {
 func NewInfo(sid, url string) *packets.PublishPacket {
 	pub := packets.NewControlPacket(packets.Publish).(*packets.PublishPacket)
 	pub.Qos = 0
-	pub.TopicName = BrokerInfoTopic
+	pub.TopicName = InfoTopic
 	pub.Retain = false
 	info := fmt.Sprintf(`{"brokerID":"%s","brokerUrl":"%s"}`, sid, url)
 	pub.Payload = []byte(info)

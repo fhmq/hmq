@@ -9,8 +9,8 @@ const (
 	PUB = "2"
 )
 
-func (b *Broker) CheckTopicAuth(action, clientID, username, ip, topic string) bool {
-	if b.auth != nil {
+func (broker *Broker) CheckTopicAuth(action, clientID, username, ip, topic string) bool {
+	if broker.auth != nil {
 		if strings.HasPrefix(topic, "$SYS/broker/connection/clients/") {
 			return true
 		}
@@ -23,16 +23,16 @@ func (b *Broker) CheckTopicAuth(action, clientID, username, ip, topic string) bo
 			topic = substr[2]
 		}
 
-		return b.auth.CheckACL(action, clientID, username, ip, topic)
+		return broker.auth.CheckACL(action, clientID, username, ip, topic)
 	}
 
 	return true
 
 }
 
-func (b *Broker) CheckConnectAuth(clientID, username, password string) bool {
-	if b.auth != nil {
-		return b.auth.CheckConnect(clientID, username, password)
+func (broker *Broker) CheckConnectAuth(clientID, username, password string) bool {
+	if broker.auth != nil {
+		return broker.auth.CheckConnect(clientID, username, password)
 	}
 
 	return true

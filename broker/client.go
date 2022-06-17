@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"hmq/plugins/bridge"
 	"io"
 	"math/rand"
 	"net"
@@ -21,21 +22,25 @@ import (
 
 	"hmq/broker/lib/sessions"
 	"hmq/broker/lib/topics"
-	"hmq/plugins/bridge"
 
 	"go.uber.org/zap"
 	"golang.org/x/net/websocket"
 )
 
 const (
-	// BrokerInfoTopic special pub topic for cluster info
-	BrokerInfoTopic = "broker000100101info"
+	// InfoTopic special pub topic for cluster info
+	InfoTopic = "broker000100101info"
+
 	// CLIENT is an end user.
 	CLIENT = 0
+
 	// ROUTER is another router in the cluster.
 	ROUTER = 1
-	//REMOTE is the router connect to other cluster
-	REMOTE  = 2
+
+	// REMOTE is the router connect to other cluster
+	REMOTE = 2
+
+	// CLUSTER is the CLUSTER itself
 	CLUSTER = 3
 )
 
@@ -45,10 +50,10 @@ const (
 
 // Possible values for client status field
 const (
-	// Client is currently connected
+	// Connected means that client is currently connected
 	Connected = 1
 
-	// Client is currently disconnected
+	// Disconnected means that client is currently disconnected
 	Disconnected = 2
 )
 
@@ -94,7 +99,7 @@ type InflightStatus uint8
 
 const (
 	Publish InflightStatus = 0
-	Pubrel  InflightStatus = 1
+	PubRel  InflightStatus = 1
 )
 
 type inflightElem struct {
@@ -166,11 +171,8 @@ func (c *client) readLoop() {
 	timeOut := keepAlive + (keepAlive / 2)
 
 	for {
-		select {
-		case <-c.ctx.Done():
-			return
-		default:
 
+		var readFromClient = func(ctx context.Context) {
 			//add read timeout
 			if keepAlive > 0 {
 				if err := netConn.SetReadDeadline(time.Now().Add(timeOut)); err != nil {
@@ -196,6 +198,7 @@ func (c *client) readLoop() {
 					client: c,
 					packet: DisconnectedPacket,
 				}
+
 				broker.SubmitWork(c.info.clientID, msg)
 				return
 			}
@@ -221,6 +224,13 @@ func (c *client) readLoop() {
 
 			// Send message to thread pool
 			broker.SubmitWork(c.info.clientID, msg)
+		}
+
+		readFromClient(c.ctx)
+
+		select {
+		case <-c.ctx.Done():
+			return
 		}
 	}
 
@@ -285,6 +295,7 @@ func validatePacketFields(msgPacket packets.ControlPacket) (validFields bool) {
 	return
 }
 
+// ProcessClientMessage  handles a packet sent from client to server
 func ProcessClientMessage(msg *Message) {
 	c := msg.client
 	clientPacket := msg.packet
@@ -314,7 +325,7 @@ func ProcessClientMessage(msg *Message) {
 		c.inflightMu.RUnlock()
 		if found {
 			if ielem.status == Publish {
-				ielem.status = Pubrel
+				ielem.status = PubRel
 				ielem.timestamp = time.Now().Unix()
 			} else {
 				log.Error("Duplicated PUBREC")
@@ -380,7 +391,7 @@ func (c *client) processRemotePublish(packet *packets.PublishPacket) {
 	}
 
 	topic := packet.TopicName
-	if topic == BrokerInfoTopic {
+	if topic == InfoTopic {
 		c.ProcessInfo(packet)
 		return
 	}
