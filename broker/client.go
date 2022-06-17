@@ -213,7 +213,6 @@ func (c *client) readLoop(ctx context.Context, cancel context.CancelFunc) {
 					return
 				}
 
-				log.Info("client exited cleanly", zap.String("ClientID", c.info.clientID))
 				c.info.willMsg = nil
 				cancel()
 			}
