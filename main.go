@@ -1,29 +1,30 @@
 package main
 
 import (
-	"log"
 	"os"
 	"os/signal"
-	"runtime"
 
 	"github.com/fhmq/hmq/broker"
+	"github.com/fhmq/hmq/logger"
+	"go.uber.org/zap"
 )
 
+var log = logger.Get()
+
 func main() {
-	runtime.GOMAXPROCS(runtime.NumCPU())
 	config, err := broker.ConfigureConfig(os.Args[1:])
 	if err != nil {
-		log.Fatal("configure broker config error: ", err)
+		log.Fatal("configure broker config error", zap.Error(err))
 	}
 
 	b, err := broker.NewBroker(config)
 	if err != nil {
-		log.Fatal("New Broker error: ", err)
+		log.Fatal("New Broker error: ", zap.Error(err))
 	}
 	b.Start()
 
 	s := waitForSignal()
-	log.Println("signal received, broker closed.", s)
+	log.Info("signal received, broker closed.", zap.Any("signal", s))
 }
 
 func waitForSignal() os.Signal {

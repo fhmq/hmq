@@ -3,7 +3,6 @@ package broker
 import (
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -13,8 +12,11 @@ import (
 	"github.com/fhmq/hmq/logger"
 	"github.com/fhmq/hmq/plugins/auth"
 	"github.com/fhmq/hmq/plugins/bridge"
+	jsoniter "github.com/json-iterator/go"
 	"go.uber.org/zap"
 )
+
+var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 type Config struct {
 	Worker   int       `json:"workerNum"`

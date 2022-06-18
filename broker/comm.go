@@ -1,11 +1,10 @@
 package broker
 
 import (
-	"encoding/json"
 	"reflect"
 	"time"
 
-	"github.com/tidwall/gjson"
+	jsoniter "github.com/json-iterator/go"
 	"go.uber.org/zap"
 
 	"github.com/eclipse/paho.mqtt.golang/packets"
@@ -134,8 +133,8 @@ func wrapPublishPacket(packet *packets.PublishPacket) *packets.PublishPacket {
 
 func unWrapPublishPacket(packet *packets.PublishPacket) *packets.PublishPacket {
 	p := packet.Copy()
-	if gjson.GetBytes(p.Payload, "payload").Exists() {
-		p.Payload = []byte(gjson.GetBytes(p.Payload, "payload").String())
+	if payload := jsoniter.Get(p.Payload, "payload").ToString(); payload != "" {
+		p.Payload = []byte(payload)
 	}
 	return p
 }
