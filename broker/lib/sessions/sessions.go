@@ -12,7 +12,7 @@ var (
 	ErrSessionsProviderNotFound = errors.New("Session: Session provider not found")
 	ErrKeyNotAvailable          = errors.New("Session: not item found for key.")
 
-	providers = make(map[string]SessionsProvider)
+	providers = make(map[string]func() SessionsProvider)
 )
 
 type SessionsProvider interface {
@@ -27,16 +27,16 @@ type SessionsProvider interface {
 // Register makes a session provider available by the provided name.
 // If a Register is called twice with the same name or if the driver is nil,
 // it panics.
-func Register(name string, provider SessionsProvider) {
-	if provider == nil {
-		panic("session: Register provide is nil")
+func Register(name string, providerFn func() SessionsProvider) {
+	if providerFn == nil {
+		panic("session: Register provider is nil")
 	}
 
 	if _, dup := providers[name]; dup {
 		panic("session: Register called twice for provider " + name)
 	}
 
-	providers[name] = provider
+	providers[name] = providerFn
 }
 
 func Unregister(name string) {
@@ -53,7 +53,7 @@ func NewManager(providerName string) (*Manager, error) {
 		return nil, fmt.Errorf("session: unknown provider %q", providerName)
 	}
 
-	return &Manager{p: p}, nil
+	return &Manager{p: p()}, nil
 }
 
 func (this *Manager) New(id string) (*Session, error) {

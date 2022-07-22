@@ -24,7 +24,7 @@ const (
 )
 
 var (
-	providers = make(map[string]TopicsProvider)
+	providers = make(map[string]func() TopicsProvider)
 )
 
 // TopicsProvider
@@ -37,16 +37,16 @@ type TopicsProvider interface {
 	Close() error
 }
 
-func Register(name string, provider TopicsProvider) {
-	if provider == nil {
-		panic("topics: Register provide is nil")
+func Register(name string, providerFn func() TopicsProvider) {
+	if providerFn == nil {
+		panic("topics: Register provider is nil")
 	}
 
 	if _, dup := providers[name]; dup {
 		panic("topics: Register called twice for provider " + name)
 	}
 
-	providers[name] = provider
+	providers[name] = providerFn
 }
 
 func Unregister(name string) {
@@ -63,7 +63,7 @@ func NewManager(providerName string) (*Manager, error) {
 		return nil, fmt.Errorf("session: unknown provider %q", providerName)
 	}
 
-	return &Manager{p: p}, nil
+	return &Manager{p: p()}, nil
 }
 
 func (this *Manager) Subscribe(topic []byte, qos byte, subscriber interface{}) (byte, error) {

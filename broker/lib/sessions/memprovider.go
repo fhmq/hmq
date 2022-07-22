@@ -8,7 +8,7 @@ import (
 var _ SessionsProvider = (*memProvider)(nil)
 
 func init() {
-	Register("mem", NewMemProvider())
+	Register("mem", func() SessionsProvider { return NewMemProvider() })
 }
 
 type memProvider struct {

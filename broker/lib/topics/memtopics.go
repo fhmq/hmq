@@ -30,7 +30,7 @@ type memTopics struct {
 }
 
 func init() {
-	Register("mem", NewMemProvider())
+	Register("mem", func() TopicsProvider { return NewMemProvider() })
 }
 
 // NewMemProvider returns an new instance of the memTopics, which is implements the
