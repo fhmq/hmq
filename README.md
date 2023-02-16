@@ -1,3 +1,7 @@
+![build](https://img.shields.io/github/workflow/status/fhmq/hmq/Ubuntu%20build?label=Ubuntu&style=for-the-badge)
+![build](https://img.shields.io/github/workflow/status/fhmq/hmq/MacOS%20build?label=MacOS&style=for-the-badge)
+![build](https://img.shields.io/github/workflow/status/fhmq/hmq/Windows%20build?label=Windows&style=for-the-badge)
+
 Free and High Performance MQTT Broker 
 ============
 
@@ -135,7 +139,7 @@ Other Version Of Cluster Based On gRPC: [click here](https://github.com/fhmq/rhm
 
 ## Reference
 
-* Surgermq.(https://github.com/surgemq/surgemq)
+* Surgermq.(https://github.com/zentures/surgemq)
 
 ## Benchmark Tool
 

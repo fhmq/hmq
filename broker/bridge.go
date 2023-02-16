@@ -5,11 +5,13 @@ import (
 	"go.uber.org/zap"
 )
 
-func (b *Broker) Publish(e *bridge.Elements) {
+func (b *Broker) Publish(e *bridge.Elements) bool {
 	if b.bridgeMQ != nil {
-		err := b.bridgeMQ.Publish(e)
+		cost, err := b.bridgeMQ.Publish(e)
 		if err != nil {
 			log.Error("send message to mq error.", zap.Error(err))
 		}
+		return cost
 	}
+	return false
 }
