@@ -309,18 +309,6 @@ func (b *Broker) StartClusterListening() {
 	}
 }
 
-func (b *Broker) DisConnClientByClientId(clientId string) {
-	cli, loaded := b.clients.LoadAndDelete(clientId)
-	if !loaded {
-		return
-	}
-	conn, success := cli.(*client)
-	if !success {
-		return
-	}
-	conn.Close()
-}
-
 func (b *Broker) handleConnection(typ int, conn net.Conn) error{
 	//process connect packet
 	packet, err := packets.ReadPacket(conn)
@@ -594,44 +582,6 @@ func (b *Broker) CheckRemoteExist(remoteID, url string) bool {
 	return exists
 }
 
-func (b *Broker) SendLocalSubsToRouter(c *client) {
-	subInfo := packets.NewControlPacket(packets.Subscribe).(*packets.SubscribePacket)
-	b.clients.Range(func(key, value interface{}) bool {
-		client, ok := value.(*client)
-		if !ok {
-			return true
-		}
-
-		client.subMapMu.RLock()
-		defer client.subMapMu.RUnlock()
-
-		subs := client.subMap
-		for _, sub := range subs {
-			subInfo.Topics = append(subInfo.Topics, sub.topic)
-			subInfo.Qoss = append(subInfo.Qoss, sub.qos)
-		}
-
-		return true
-	})
-	if len(subInfo.Topics) > 0 {
-		if err := c.WriterPacket(subInfo); err != nil {
-			log.Error("Send localsubs To Router error", zap.Error(err))
-		}
-	}
-}
-
-func (b *Broker) BroadcastInfoMessage(remoteID string, msg *packets.PublishPacket) {
-	b.routes.Range(func(key, value interface{}) bool {
-		if r, ok := value.(*client); ok {
-			if r.route.remoteID == remoteID {
-				return true
-			}
-			r.WriterPacket(msg)
-		}
-		return true
-	})
-}
-
 func (b *Broker) BroadcastSubOrUnsubMessage(packet packets.ControlPacket) {
 
 	b.routes.Range(func(key, value interface{}) bool {
@@ -674,18 +624,6 @@ func (b *Broker) PublishMessage(packet *packets.PublishPacket) {
 			}
 		}
 	}
-}
-
-func (b *Broker) PublishMessageByClientId(packet *packets.PublishPacket, clientId string) error {
-	cli, loaded := b.clients.LoadAndDelete(clientId)
-	if !loaded {
-		return fmt.Errorf("clientId %s not connected", clientId)
-	}
-	conn, success := cli.(*client)
-	if !success {
-		return fmt.Errorf("clientId %s loaded fail", clientId)
-	}
-	return conn.WriterPacket(packet)
 }
 
 func (b *Broker) BroadcastUnSubscribe(topicsToUnSubscribeFrom []string) {
