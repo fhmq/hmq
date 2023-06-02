@@ -325,7 +325,7 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) error{
 	//process connect packet
 	packet, err := packets.ReadPacket(conn)
 	if err != nil {
-		return errors.New(fmt.Sprintln("read connect packet error:%v",err))
+		return fmt.Errorf("read connect packet error:%v",err)
 	}
 	if packet == nil {
 		return errors.New("received nil packet")
@@ -343,21 +343,21 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) error{
 
 	if connack.ReturnCode != packets.Accepted {
 		if err := connack.Write(conn); err != nil {
-			return errors.New(fmt.Sprintln("send connack error:%v,clientID:%v,conn:%v",err,msg.ClientIdentifier,conn))
+			return fmt.Errorf("send connack error:%v,clientID:%v,conn:%v",err,msg.ClientIdentifier,conn)
 		}
-		return errors.New(fmt.Sprintln("connect packet validate failed with connack.ReturnCode%v",connack.ReturnCode))
+		return fmt.Errorf("connect packet validate failed with connack.ReturnCode%v",connack.ReturnCode)
 	}
 
 	if typ == CLIENT && !b.CheckConnectAuth(msg.ClientIdentifier, msg.Username, string(msg.Password)) {
 		connack.ReturnCode = packets.ErrRefusedNotAuthorised
 		if err := connack.Write(conn); err != nil {
-			return errors.New(fmt.Sprintln("send connack error:%v,clientID:%v,conn:%v",err,msg.ClientIdentifier,conn))
+			return fmt.Errorf("send connack error:%v,clientID:%v,conn:%v",err,msg.ClientIdentifier,conn)
 		}
-		return errors.New(fmt.Sprintln("connect packet CheckConnectAuth failed with connack.ReturnCode%v",connack.ReturnCode))
+		return fmt.Errorf("connect packet CheckConnectAuth failed with connack.ReturnCode%v",connack.ReturnCode)
 	}
 
 	if err := connack.Write(conn); err != nil {
-		return errors.New(fmt.Sprintln("send connack error:%v,clientID:%v,conn:%v",err,msg.ClientIdentifier,conn))
+		return fmt.Errorf("send connack error:%v,clientID:%v,conn:%v",err,msg.ClientIdentifier,conn)
 	}
 
 	willmsg := packets.NewControlPacket(packets.Publish).(*packets.PublishPacket)
@@ -388,7 +388,7 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) error{
 	c.init()
 
 	if err := b.getSession(c, msg, connack); err != nil {
-		return errors.New(fmt.Sprintln("get session error:%v,clientID:%v,conn:%v",err,msg.ClientIdentifier,conn))
+		return fmt.Errorf("get session error:%v,clientID:%v,conn:%v",err,msg.ClientIdentifier,conn)
 	}
 
 	cid := c.info.clientID
@@ -594,44 +594,6 @@ func (b *Broker) CheckRemoteExist(remoteID, url string) bool {
 	return exists
 }
 
-func (b *Broker) SendLocalSubsToRouter(c *client) {
-	subInfo := packets.NewControlPacket(packets.Subscribe).(*packets.SubscribePacket)
-	b.clients.Range(func(key, value interface{}) bool {
-		client, ok := value.(*client)
-		if !ok {
-			return true
-		}
-
-		client.subMapMu.RLock()
-		defer client.subMapMu.RUnlock()
-
-		subs := client.subMap
-		for _, sub := range subs {
-			subInfo.Topics = append(subInfo.Topics, sub.topic)
-			subInfo.Qoss = append(subInfo.Qoss, sub.qos)
-		}
-
-		return true
-	})
-	if len(subInfo.Topics) > 0 {
-		if err := c.WriterPacket(subInfo); err != nil {
-			log.Error("Send localsubs To Router error", zap.Error(err))
-		}
-	}
-}
-
-func (b *Broker) BroadcastInfoMessage(remoteID string, msg *packets.PublishPacket) {
-	b.routes.Range(func(key, value interface{}) bool {
-		if r, ok := value.(*client); ok {
-			if r.route.remoteID == remoteID {
-				return true
-			}
-			r.WriterPacket(msg)
-		}
-		return true
-	})
-}
-
 func (b *Broker) BroadcastSubOrUnsubMessage(packet packets.ControlPacket) {
 
 	b.routes.Range(func(key, value interface{}) bool {
@@ -674,18 +636,6 @@ func (b *Broker) PublishMessage(packet *packets.PublishPacket) {
 			}
 		}
 	}
-}
-
-func (b *Broker) PublishMessageByClientId(packet *packets.PublishPacket, clientId string) error {
-	cli, loaded := b.clients.LoadAndDelete(clientId)
-	if !loaded {
-		return fmt.Errorf("clientId %s not connected", clientId)
-	}
-	conn, success := cli.(*client)
-	if !success {
-		return fmt.Errorf("clientId %s loaded fail", clientId)
-	}
-	return conn.WriterPacket(packet)
 }
 
 func (b *Broker) BroadcastUnSubscribe(topicsToUnSubscribeFrom []string) {
