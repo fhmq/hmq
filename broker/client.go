@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"math/rand"
 	"net"
 	"reflect"
@@ -171,7 +172,7 @@ func (c *client) readLoop() {
 			}
 
 			packet, err := packets.ReadPacket(nc)
-			if err != nil {
+			if err != nil && err!=io.EOF{
 				log.Error("read packet error: ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 				msg := &Message{
 					client: c,
@@ -864,7 +865,7 @@ func (c *client) Close() {
 func (c *client) WriterPacket(packet packets.ControlPacket) error {
 	defer func() {
 		if err := recover(); err != nil {
-			log.Error("recover error, ", zap.Any("recover", r))
+			log.Error("recover error, ", zap.Any("recover", err))
 		}
 	}()
 	if c.status == Disconnected {
