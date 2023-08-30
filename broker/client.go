@@ -864,7 +864,7 @@ func (c *client) Close() {
 func (c *client) WriterPacket(packet packets.ControlPacket) error {
 	defer func() {
 		if err := recover(); err != nil {
-			log.Error("recover error, ", zap.Any("recover", r))
+			log.Error("recover error, ", zap.Any("recover", err))
 		}
 	}()
 	if c.status == Disconnected {
