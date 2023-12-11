@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"sync"
 	"time"
+	encJson "encoding/json"
 
 	"github.com/fhmq/hmq/broker/lib/sessions"
 	"github.com/fhmq/hmq/broker/lib/topics"
@@ -404,8 +405,19 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) {
 			}
 		}
 		b.clients.Store(cid, c)
+		
+		pubInfo := Info{
+			ClientID: info.clientID,
+			Username: info.username,
+			Password: info.password,
+			Keepalive: info.keepalive,
+			WillMsg: &PubPacket{
+				TopicName: info.willMsg.TopicName,
+				Payload: info.willMsg.Payload,
+			},
+		}
 
-		b.OnlineOfflineNotification(cid, true)
+		b.OnlineOfflineNotification(pubInfo, true, c.lastMsgTime)
 		{
 			b.Publish(&bridge.Elements{
 				ClientID:  msg.ClientIdentifier,
@@ -695,11 +707,33 @@ func (b *Broker) BroadcastUnSubscribe(topicsToUnSubscribeFrom []string) {
 	b.BroadcastSubOrUnsubMessage(unsub)
 }
 
-func (b *Broker) OnlineOfflineNotification(clientID string, online bool) {
+type OnlineOfflineMsg struct {
+	ClientID	string		`json:"clientID"`
+	Online		bool		`json:"online"`
+	Timestamp	string		`json:"timestamp"`
+	ClientInfo	Info		`json:"info"`
+	LastMsgTime	int64		`json:"lastMsg"`
+}
+
+func (b *Broker) OnlineOfflineNotification(info Info, online bool, lastMsg int64) {
 	packet := packets.NewControlPacket(packets.Publish).(*packets.PublishPacket)
-	packet.TopicName = "$SYS/broker/connection/clients/" + clientID
+	packet.TopicName = "$SYS/broker/connection/clients/" + info.ClientID
 	packet.Qos = 0
-	packet.Payload = []byte(fmt.Sprintf(`{"clientID":"%s","online":%v,"timestamp":"%s"}`, clientID, online, time.Now().UTC().Format(time.RFC3339)))
+
+	msg := OnlineOfflineMsg{
+		ClientID: info.ClientID,
+		Online: online,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		ClientInfo: info,
+		LastMsgTime: lastMsg,
+	}
+
+	if b, err := encJson.Marshal(msg); err != nil {
+		//This is a TERRIBLE situation, falling back to legacy format to not break API Contract
+		packet.Payload = []byte(fmt.Sprintf(`{"clientID":"%s","online":%v,"timestamp":"%s"}`, info.ClientID, online, time.Now().UTC().Format(time.RFC3339)))
+	} else {
+		packet.Payload = b
+	}
 
 	b.PublishMessage(packet)
 }

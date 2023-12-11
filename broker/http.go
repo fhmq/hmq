@@ -8,9 +8,14 @@ const (
 	CONNECTIONS	= "api/v1/connections"
 )
 
+type ConnClient struct {
+	Info				`json:"info"`
+	LastMsgTime	int64		`json:"lastMsg"`
+}
+
 type resp struct {
 	Code	int		`json:"code,omitempty"`
-	Clients	[]string	`json:"clients,omitempty"`
+	Clients	[]ConnClient	`json:"clients,omitempty"`
 }
 
 func InitHTTPMoniter(b *Broker) {
@@ -29,9 +34,25 @@ func InitHTTPMoniter(b *Broker) {
 		c.JSON(200, &r)
 	})
 	router.GET(CONNECTIONS, func(c *gin.Context) {
-		conns := make([]string, 0)
+		conns := make([]ConnClient, 0)
 		b.clients.Range(func (k, v interface{}) bool {
-			conns = append(conns, v.(*client).info.clientID)
+			cl, _ := v.(*client)
+
+			msg := ConnClient{
+				Info: Info{
+					ClientID: cl.info.clientID,
+					Username: cl.info.username,
+					Password: cl.info.password,
+					Keepalive: cl.info.keepalive,
+					WillMsg: &PubPacket{
+						TopicName: cl.info.willMsg.TopicName,
+						Payload: cl.info.willMsg.Payload,
+					},
+				},
+				LastMsgTime: cl.lastMsgTime,
+			}
+
+			conns = append(conns, msg)
 			return true
 		})
 		r := resp{Clients: conns}
