@@ -7,3 +7,7 @@ log/*
 .vscode/settings.json
 .pre-commit-config.yaml
 hmq.exe
+*.sw*
+*.swo
+*.swp
+*.swn

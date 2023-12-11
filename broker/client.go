@@ -79,6 +79,7 @@ type client struct {
 	mqueue         *queue.Queue
 	retryTimer     *time.Timer
 	retryTimerLock sync.Mutex
+	lastMsgTime	int64
 }
 
 type InflightStatus uint8
@@ -111,6 +112,19 @@ type info struct {
 	remoteIP  string
 }
 
+type PubPacket struct {
+	TopicName	string			`json:"topicName"`
+	Payload		[]byte			`json:"payload"`
+}
+
+type Info struct {
+	ClientID  string			`json:"clientId"`
+	Username  string			`json:"username"`
+	Password  []byte			`json:"password"`
+	Keepalive uint16			`json:"keepalive"`
+	WillMsg   *PubPacket			`json:"willMsg"`
+}
+
 type route struct {
 	remoteID  string
 	remoteUrl string
@@ -122,6 +136,7 @@ var (
 )
 
 func (c *client) init() {
+	c.lastMsgTime = time.Now().Unix()		//mark the connection packet time as last time messaged
 	c.status = Connected
 	c.info.localIP, _, _ = net.SplitHostPort(c.conn.LocalAddr().String())
 	remoteAddr := c.conn.RemoteAddr()
@@ -185,6 +200,8 @@ func (c *client) readLoop() {
 			if _, isDisconnect := packet.(*packets.DisconnectPacket); isDisconnect {
 				c.info.willMsg = nil
 				c.cancelFunc()
+			} else {
+				c.lastMsgTime = time.Now().Unix()
 			}
 
 			msg := &Message{
@@ -842,8 +859,18 @@ func (c *client) Close() {
 
 	if c.typ == CLIENT {
 		b.BroadcastUnSubscribe(unSubTopics)
+		pubInfo := Info{
+			ClientID: c.info.clientID,
+			Username: c.info.username,
+			Password: c.info.password,
+			Keepalive: c.info.keepalive,
+			WillMsg: &PubPacket{
+				TopicName: c.info.willMsg.TopicName,
+				Payload: c.info.willMsg.Payload,
+			},
+		}
 		//offline notification
-		b.OnlineOfflineNotification(c.info.clientID, false)
+		b.OnlineOfflineNotification(pubInfo, false, c.lastMsgTime)
 	}
 
 	if c.info.willMsg != nil {
