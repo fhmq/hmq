@@ -37,6 +37,11 @@ func InitHTTPMoniter(b *Broker) {
 		conns := make([]ConnClient, 0)
 		b.clients.Range(func (k, v interface{}) bool {
 			cl, _ := v.(*client)
+			var pubPack = PubPacket{}
+			if cl.info.willMsg != nil {
+				pubPack.TopicName = cl.info.willMsg.TopicName
+				pubPack.Payload = cl.info.willMsg.Payload
+			}
 
 			msg := ConnClient{
 				Info: Info{
@@ -44,10 +49,7 @@ func InitHTTPMoniter(b *Broker) {
 					Username: cl.info.username,
 					Password: cl.info.password,
 					Keepalive: cl.info.keepalive,
-					WillMsg: &PubPacket{
-						TopicName: cl.info.willMsg.TopicName,
-						Payload: cl.info.willMsg.Payload,
-					},
+					WillMsg: pubPack,
 				},
 				LastMsgTime: cl.lastMsgTime,
 			}
