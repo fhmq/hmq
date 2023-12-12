@@ -407,7 +407,6 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) error{
 			}
 		}
 		b.clients.Store(cid, c)
-		log.Warn("trying to build publish packet..\n")
 
 		var pubPack = PubPacket{}
 		if willmsg != nil {
