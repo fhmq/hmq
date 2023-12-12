@@ -122,7 +122,7 @@ type Info struct {
 	Username  string			`json:"username"`
 	Password  []byte			`json:"password"`
 	Keepalive uint16			`json:"keepalive"`
-	WillMsg   *PubPacket			`json:"willMsg"`
+	WillMsg   PubPacket			`json:"willMsg"`
 }
 
 type route struct {
@@ -859,15 +859,19 @@ func (c *client) Close() {
 
 	if c.typ == CLIENT {
 		b.BroadcastUnSubscribe(unSubTopics)
+
+		var pubPack = PubPacket{}
+		if c.info.willMsg != nil {
+			pubPack.TopicName = c.info.willMsg.TopicName
+			pubPack.Payload = c.info.willMsg.Payload
+		}
+
 		pubInfo := Info{
 			ClientID: c.info.clientID,
 			Username: c.info.username,
 			Password: c.info.password,
 			Keepalive: c.info.keepalive,
-			WillMsg: &PubPacket{
-				TopicName: c.info.willMsg.TopicName,
-				Payload: c.info.willMsg.Payload,
-			},
+			WillMsg: pubPack,
 		}
 		//offline notification
 		b.OnlineOfflineNotification(pubInfo, false, c.lastMsgTime)

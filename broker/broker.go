@@ -407,16 +407,20 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) error{
 			}
 		}
 		b.clients.Store(cid, c)
+		log.Warn("trying to build publish packet..\n")
+
+		var pubPack = PubPacket{}
+		if willmsg != nil {
+			pubPack.TopicName = info.willMsg.TopicName
+			pubPack.Payload = info.willMsg.Payload
+		}
 		
 		pubInfo := Info{
 			ClientID: info.clientID,
 			Username: info.username,
 			Password: info.password,
 			Keepalive: info.keepalive,
-			WillMsg: &PubPacket{
-				TopicName: info.willMsg.TopicName,
-				Payload: info.willMsg.Payload,
-			},
+			WillMsg: pubPack,
 		}
 
 		b.OnlineOfflineNotification(pubInfo, true, c.lastMsgTime)
