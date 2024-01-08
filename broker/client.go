@@ -79,7 +79,7 @@ type client struct {
 	mqueue         *queue.Queue
 	retryTimer     *time.Timer
 	retryTimerLock sync.Mutex
-	lastMsgTime	int64
+	lastMsgTime    int64
 }
 
 type InflightStatus uint8
@@ -113,16 +113,16 @@ type info struct {
 }
 
 type PubPacket struct {
-	TopicName	string			`json:"topicName"`
-	Payload		[]byte			`json:"payload"`
+	TopicName string `json:"topicName"`
+	Payload   []byte `json:"payload"`
 }
 
 type Info struct {
-	ClientID  string			`json:"clientId"`
-	Username  string			`json:"username"`
-	Password  []byte			`json:"password"`
-	Keepalive uint16			`json:"keepalive"`
-	WillMsg   PubPacket			`json:"willMsg"`
+	ClientID  string    `json:"clientId"`
+	Username  string    `json:"username"`
+	Password  []byte    `json:"password"`
+	Keepalive uint16    `json:"keepalive"`
+	WillMsg   PubPacket `json:"willMsg"`
 }
 
 type route struct {
@@ -136,7 +136,7 @@ var (
 )
 
 func (c *client) init() {
-	c.lastMsgTime = time.Now().Unix()		//mark the connection packet time as last time messaged
+	c.lastMsgTime = time.Now().Unix() //mark the connection packet time as last time messaged
 	c.status = Connected
 	c.info.localIP, _, _ = net.SplitHostPort(c.conn.LocalAddr().String())
 	remoteAddr := c.conn.RemoteAddr()
@@ -867,11 +867,11 @@ func (c *client) Close() {
 		}
 
 		pubInfo := Info{
-			ClientID: c.info.clientID,
-			Username: c.info.username,
-			Password: c.info.password,
+			ClientID:  c.info.clientID,
+			Username:  c.info.username,
+			Password:  c.info.password,
 			Keepalive: c.info.keepalive,
-			WillMsg: pubPack,
+			WillMsg:   pubPack,
 		}
 		//offline notification
 		b.OnlineOfflineNotification(pubInfo, false, c.lastMsgTime)
