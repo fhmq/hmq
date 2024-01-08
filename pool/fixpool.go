@@ -43,16 +43,14 @@ func (p *WorkerPool) dispatch() {
 }
 
 func startWorker(taskChan chan func()) {
-	go func() {
-		var task func()
-		var ok bool
-		for {
-			task, ok = <-taskChan
-			if !ok {
-				break
-			}
-			// Execute the task.
-			task()
+	var task func()
+	var ok bool
+	for {
+		task, ok = <-taskChan
+		if !ok {
+			break
 		}
-	}()
+		// Execute the task.
+		task()
+	}
 }
