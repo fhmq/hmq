@@ -6,7 +6,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"os"
 
 	"github.com/fhmq/hmq/logger"
@@ -22,6 +21,7 @@ type Config struct {
 	Worker   int       `json:"workerNum"`
 	HTTPPort string    `json:"httpPort"`
 	Host     string    `json:"host"`
+	V5Port   string    `json:"v5Port"`
 	Port     string    `json:"port"`
 	Cluster  RouteInfo `json:"cluster"`
 	Router   string    `json:"router"`
@@ -89,6 +89,8 @@ func ConfigureConfig(args []string) (*Config, error) {
 	fs.StringVar(&config.HTTPPort, "hp", "8080", "Port to listen on.")
 	fs.StringVar(&config.Port, "port", "1883", "Port to listen on.")
 	fs.StringVar(&config.Port, "p", "1883", "Port to listen on.")
+	fs.StringVar(&config.V5Port, "v5port", "", "Port v5 to listen on.")
+	fs.StringVar(&config.V5Port, "p5", "", "Port v5 to listen on.")
 	fs.StringVar(&config.Host, "host", "0.0.0.0", "Network host to listen on")
 	fs.StringVar(&config.Cluster.Port, "cp", "", "Cluster port from which members can connect.")
 	fs.StringVar(&config.Cluster.Port, "clusterport", "", "Cluster port from which members can connect.")
@@ -144,7 +146,7 @@ func ConfigureConfig(args []string) (*Config, error) {
 
 func LoadConfig(filename string) (*Config, error) {
 
-	content, err := ioutil.ReadFile(filename)
+	content, err := os.ReadFile(filename)
 	if err != nil {
 		// log.Error("Read config file error: ", zap.Error(err))
 		return nil, err
@@ -231,7 +233,7 @@ func NewTLSConfig(tlsInfo TLSInfo) (*tls.Config, error) {
 	}
 	// Add in CAs if applicable.
 	if tlsInfo.CaFile != "" {
-		rootPEM, err := ioutil.ReadFile(tlsInfo.CaFile)
+		rootPEM, err := os.ReadFile(tlsInfo.CaFile)
 		if err != nil || rootPEM == nil {
 			return nil, err
 		}

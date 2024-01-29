@@ -17,6 +17,8 @@ import (
 	"github.com/fhmq/hmq/pool"
 
 	"github.com/eclipse/paho.mqtt.golang/packets"
+
+	v5packets "github.com/eclipse/paho.golang/packets"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/net/websocket"
@@ -320,6 +322,123 @@ func (b *Broker) DisConnClientByClientId(clientId string) {
 		return
 	}
 	conn.Close()
+}
+
+func (b *Broker) handleV5Connection(typ int, conn net.Conn) error {
+	//process connect packet
+	cp, err := v5packets.ReadPacket(conn)
+	if err != nil {
+		return errors.New(fmt.Sprintf("read connect packet error:%v", err))
+	}
+	if cp == nil {
+		return errors.New("received nil packet")
+	}
+	if cp.Type != v5packets.CONNECT {
+		return errors.New("received msg that was not Connect")
+	}
+
+	msg := cp.Content.(*v5packets.Connect)
+
+	log.Info("read connect from ", getAdditionalLogFields(msg.ClientID, conn)...)
+
+	connack := &v5packets.Connack{
+		SessionPresent: msg.CleanStart,
+	}
+
+	if typ == CLIENT && !b.CheckConnectAuth(msg.ClientID, msg.Username, string(msg.Password)) {
+		connack.ReasonCode = v5packets.ConnackBadUsernameOrPassword
+		if _, err := connack.WriteTo(conn); err != nil {
+			return fmt.Errorf("send connack error:%v,clientID:%v,conn:%v", err, msg.ClientID, conn)
+		}
+		return fmt.Errorf("connect packet CheckConnectAuth failed with connack.ReturnCode%v", connack.ReasonCode)
+	}
+
+	if _, err := connack.WriteTo(conn); err != nil {
+		return fmt.Errorf("send connack error:%v,clientID:%v,conn:%v", err, msg.ClientID, conn)
+	}
+
+	willmsg := &v5packets.Publish{}
+	if msg.WillFlag {
+		willmsg.QoS = msg.WillQOS
+		willmsg.Topic = msg.WillTopic
+		willmsg.Retain = msg.WillRetain
+		willmsg.Payload = msg.WillMessage
+	} else {
+		willmsg = nil
+	}
+	info := info{
+		clientID:  msg.ClientID,
+		username:  msg.Username,
+		password:  msg.Password,
+		keepalive: msg.KeepAlive,
+		willMsg:   willmsg,
+	}
+
+	c := &client{
+		typ:    typ,
+		broker: b,
+		conn:   conn,
+		info:   info,
+	}
+
+	c.init()
+
+	if err := b.getSession(c, msg, connack); err != nil {
+		return fmt.Errorf("get session error:%v,clientID:%v,conn:%v", err, msg.ClientIdentifier, conn)
+	}
+
+	cid := c.info.clientID
+
+	var exists bool
+	var old interface{}
+
+	switch typ {
+	case CLIENT:
+		old, exists = b.clients.Load(cid)
+		if exists {
+			if ol, ok := old.(*client); ok {
+				log.Warn("client exists, close old client", getAdditionalLogFields(ol.info.clientID, ol.conn)...)
+				ol.Close()
+			}
+		}
+		b.clients.Store(cid, c)
+
+		var pubPack = PubPacket{}
+		if willmsg != nil {
+			pubPack.TopicName = info.willMsg.TopicName
+			pubPack.Payload = info.willMsg.Payload
+		}
+
+		pubInfo := Info{
+			ClientID:  info.clientID,
+			Username:  info.username,
+			Password:  info.password,
+			Keepalive: info.keepalive,
+			WillMsg:   pubPack,
+		}
+
+		b.OnlineOfflineNotification(pubInfo, true, c.lastMsgTime)
+		{
+			b.Publish(&bridge.Elements{
+				ClientID:  msg.ClientIdentifier,
+				Username:  msg.Username,
+				Action:    bridge.Connect,
+				Timestamp: time.Now().Unix(),
+			})
+		}
+	case ROUTER:
+		old, exists = b.routes.Load(cid)
+		if exists {
+			if ol, ok := old.(*client); ok {
+				log.Warn("router exists, close old router", getAdditionalLogFields(ol.info.clientID, ol.conn)...)
+				ol.Close()
+			}
+		}
+		b.routes.Store(cid, c)
+	}
+
+	c.readLoop()
+	return nil
 }
 
 func (b *Broker) handleConnection(typ int, conn net.Conn) error {
