@@ -19,20 +19,21 @@ import (
 var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 type Config struct {
-	Worker   int       `json:"workerNum"`
-	HTTPPort string    `json:"httpPort"`
-	Host     string    `json:"host"`
-	Port     string    `json:"port"`
-	Cluster  RouteInfo `json:"cluster"`
-	Router   string    `json:"router"`
-	TlsHost  string    `json:"tlsHost"`
-	TlsPort  string    `json:"tlsPort"`
-	WsPath   string    `json:"wsPath"`
-	WsPort   string    `json:"wsPort"`
-	WsTLS    bool      `json:"wsTLS"`
-	TlsInfo  TLSInfo   `json:"tlsInfo"`
-	Debug    bool      `json:"debug"`
-	Plugin   Plugins   `json:"plugins"`
+	Worker       int       `json:"workerNum"`
+	HTTPPort     string    `json:"httpPort"`
+	Host         string    `json:"host"`
+	Port         string    `json:"port"`
+	Cluster      RouteInfo `json:"cluster"`
+	Router       string    `json:"router"`
+	TlsHost      string    `json:"tlsHost"`
+	TlsPort      string    `json:"tlsPort"`
+	WsPath       string    `json:"wsPath"`
+	WsPort       string    `json:"wsPort"`
+	WsTLS        bool      `json:"wsTLS"`
+	TlsInfo      TLSInfo   `json:"tlsInfo"`
+	Debug        bool      `json:"debug"`
+	Plugin       Plugins   `json:"plugins"`
+	UnixFilePath string    `json:"unixFilePath"`
 }
 
 type Plugins struct {
@@ -87,8 +88,9 @@ func ConfigureConfig(args []string) (*Config, error) {
 	fs.IntVar(&config.Worker, "worker", 1024, "worker num to process message, perfer (client num)/10.")
 	fs.StringVar(&config.HTTPPort, "httpport", "8080", "Port to listen on.")
 	fs.StringVar(&config.HTTPPort, "hp", "8080", "Port to listen on.")
-	fs.StringVar(&config.Port, "port", "1883", "Port to listen on.")
-	fs.StringVar(&config.Port, "p", "1883", "Port to listen on.")
+	fs.StringVar(&config.Port, "port", "", "Port to listen on.")
+	fs.StringVar(&config.Port, "p", "", "Port to listen on.")
+	fs.StringVar(&config.UnixFilePath, "unixfilepath", "", "unix sock to listen on.")
 	fs.StringVar(&config.Host, "host", "0.0.0.0", "Network host to listen on")
 	fs.StringVar(&config.Cluster.Port, "cp", "", "Cluster port from which members can connect.")
 	fs.StringVar(&config.Cluster.Port, "clusterport", "", "Cluster port from which members can connect.")
