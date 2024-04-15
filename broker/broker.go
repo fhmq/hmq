@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -160,6 +161,11 @@ func (b *Broker) Start() {
 		go b.StartClientListening(false)
 	}
 
+	//listen client over unix
+	if b.config.Port == "" && b.config.UnixFilePath != "" {
+		go b.StartUnixSocketClientListening(b.config.UnixFilePath, true)
+	}
+
 	//listen for cluster
 	if b.config.Cluster.Port != "" {
 		go b.StartClusterListening()
@@ -228,6 +234,60 @@ func (b *Broker) StartClientListening(Tls bool) {
 			log.Info("Start Listening client on ", zap.String("hp", hp))
 		}
 
+		if err == nil {
+			break // successfully listening
+		}
+
+		log.Error("Error listening on ", zap.Error(err))
+		time.Sleep(1 * time.Second)
+	}
+
+	tmpDelay := 10 * ACCEPT_MIN_SLEEP
+	for {
+		conn, err := l.Accept()
+		if err != nil {
+			if ne, ok := err.(net.Error); ok && ne.Temporary() {
+				log.Error(
+					"Temporary Client Accept Error(%v), sleeping %dms",
+					zap.Error(ne),
+					zap.Duration("sleeping", tmpDelay/time.Millisecond),
+				)
+
+				time.Sleep(tmpDelay)
+				tmpDelay *= 2
+				if tmpDelay > ACCEPT_MAX_SLEEP {
+					tmpDelay = ACCEPT_MAX_SLEEP
+				}
+			} else {
+				log.Error("Accept error", zap.Error(err))
+			}
+			continue
+		}
+
+		tmpDelay = ACCEPT_MIN_SLEEP
+		go func() {
+			err := b.handleConnection(CLIENT, conn)
+			if err != nil {
+				conn.Close()
+			}
+		}()
+	}
+}
+
+func (b *Broker) StartUnixSocketClientListening(socketPath string, UnixSocket bool) {
+	var err error
+	var l net.Listener
+	for {
+		if UnixSocket {
+			if FileExist(socketPath) {
+				if err != nil {
+					log.Error("Remove Unix socketPath ", zap.Error(err))
+				}
+			}
+			conn, _ := net.ResolveUnixAddr("unix", socketPath)
+			l, err = net.ListenUnix("unix", conn)
+			log.Info("Start Listening client on Unix socket", zap.String("socketPath", socketPath))
+		}
 		if err == nil {
 			break // successfully listening
 		}
@@ -742,4 +802,16 @@ func (b *Broker) OnlineOfflineNotification(info Info, online bool, lastMsg int64
 	}
 
 	b.PublishMessage(packet)
+}
+
+func FileExist(name string) bool {
+	_, err := os.Stat(name)
+	if err == nil {
+		return true
+	} else if os.IsNotExist(err) {
+		return false
+	} else {
+		panic(err)
+	}
+
 }
