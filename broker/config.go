@@ -19,21 +19,22 @@ import (
 var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 type Config struct {
-	Worker       int       `json:"workerNum"`
-	HTTPPort     string    `json:"httpPort"`
-	Host         string    `json:"host"`
-	Port         string    `json:"port"`
-	Cluster      RouteInfo `json:"cluster"`
-	Router       string    `json:"router"`
-	TlsHost      string    `json:"tlsHost"`
-	TlsPort      string    `json:"tlsPort"`
-	WsPath       string    `json:"wsPath"`
-	WsPort       string    `json:"wsPort"`
-	WsTLS        bool      `json:"wsTLS"`
-	TlsInfo      TLSInfo   `json:"tlsInfo"`
-	Debug        bool      `json:"debug"`
-	Plugin       Plugins   `json:"plugins"`
-	UnixFilePath string    `json:"unixFilePath"`
+	Worker          int       `json:"workerNum"`
+	HTTPPort        string    `json:"httpPort"`
+	Host            string    `json:"host"`
+	Port            string    `json:"port"`
+	Cluster         RouteInfo `json:"cluster"`
+	Router          string    `json:"router"`
+	TlsHost         string    `json:"tlsHost"`
+	TlsPort         string    `json:"tlsPort"`
+	WsPath          string    `json:"wsPath"`
+	WsPort          string    `json:"wsPort"`
+	WsTLS           bool      `json:"wsTLS"`
+	TlsInfo         TLSInfo   `json:"tlsInfo"`
+	Debug           bool      `json:"debug"`
+	Plugin          Plugins   `json:"plugins"`
+	UnixFilePath    string    `json:"unixFilePath"`
+	WindowsPipeName string    `json:"windowsPipeName"`
 }
 
 type Plugins struct {
