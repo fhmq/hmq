@@ -165,6 +165,10 @@ func (b *Broker) Start() {
 	if b.config.Port == "" && b.config.UnixFilePath != "" {
 		go b.StartUnixSocketClientListening(b.config.UnixFilePath, true)
 	}
+	//listen client over windows pipe
+	if b.config.Port == "" && b.config.UnixFilePath == "" && b.config.WindowsPipeName != "" {
+		go b.StartPipeSocketListening(b.config.WindowsPipeName, true)
+	}
 
 	//listen for cluster
 	if b.config.Cluster.Port != "" {
@@ -274,11 +278,11 @@ func (b *Broker) StartClientListening(Tls bool) {
 	}
 }
 
-func (b *Broker) StartUnixSocketClientListening(socketPath string, UnixSocket bool) {
+func (b *Broker) StartUnixSocketClientListening(socketPath string, unixSocket bool) {
 	var err error
 	var l net.Listener
 	for {
-		if UnixSocket {
+		if unixSocket {
 			if FileExist(socketPath) {
 				if err != nil {
 					log.Error("Remove Unix socketPath ", zap.Error(err))
