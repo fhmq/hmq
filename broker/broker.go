@@ -284,8 +284,8 @@ func (b *Broker) StartUnixSocketClientListening(socketPath string, unixSocket bo
 	for {
 		if unixSocket {
 			if FileExist(socketPath) {
+				err = os.Remove(socketPath)
 				if err != nil {
-					err = os.Remove(socketPath)
 					log.Error("Remove Unix socketPath ", zap.Error(err))
 				}
 			}
