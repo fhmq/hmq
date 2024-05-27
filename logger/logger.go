@@ -38,6 +38,15 @@ func NewProdLogger() (*zap.Logger, error) {
 	return logCfg.Build()
 }
 
+// NewReleaseLogger return a logger for production builds
+func NewReleaseLogger() (*zap.Logger, error) {
+	logCfg := zap.NewProductionConfig()
+	logCfg.DisableStacktrace = true
+	logCfg.Level = zap.NewAtomicLevelAt(zap.ErrorLevel)
+	logCfg.EncoderConfig = encoderCfg
+	return logCfg.Build()
+}
+
 func Prod() *zap.Logger {
 
 	l, _ := NewProdLogger()
@@ -49,6 +58,14 @@ func Prod() *zap.Logger {
 func Debug() *zap.Logger {
 
 	l, _ := NewDevLogger()
+	instance = l
+
+	return instance
+}
+
+func Release() *zap.Logger {
+
+	l, _ := NewReleaseLogger()
 	instance = l
 
 	return instance
