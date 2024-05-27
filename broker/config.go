@@ -31,7 +31,7 @@ type Config struct {
 	WsPort          string    `json:"wsPort"`
 	WsTLS           bool      `json:"wsTLS"`
 	TlsInfo         TLSInfo   `json:"tlsInfo"`
-	Debug           bool      `json:"debug"`
+	Debug           string    `json:"debug"`
 	Plugin          Plugins   `json:"plugins"`
 	UnixFilePath    string    `json:"unixFilePath"`
 	WindowsPipeName string    `json:"windowsPipeName"`
@@ -87,12 +87,12 @@ func ConfigureConfig(args []string) (*Config, error) {
 	fs.BoolVar(&help, "help", false, "Show this message.")
 	fs.IntVar(&config.Worker, "w", 1024, "worker num to process message, perfer (client num)/10.")
 	fs.IntVar(&config.Worker, "worker", 1024, "worker num to process message, perfer (client num)/10.")
-	fs.StringVar(&config.HTTPPort, "httpport", "8080", "Port to listen on.")
-	fs.StringVar(&config.HTTPPort, "hp", "8080", "Port to listen on.")
-	fs.StringVar(&config.Port, "port", "", "Port to listen on.")
-	fs.StringVar(&config.Port, "p", "", "Port to listen on.")
+	fs.StringVar(&config.HTTPPort, "httpport", "", "Port to listen on.")
+	fs.StringVar(&config.HTTPPort, "hp", "", "Port to listen on.")
+	fs.StringVar(&config.Port, "port", "8090", "Port to listen on.")
+	fs.StringVar(&config.Port, "p", "8090", "Port to listen on.")
 	fs.StringVar(&config.UnixFilePath, "unixfilepath", "", "unix sock to listen on.")
-	fs.StringVar(&config.Host, "host", "0.0.0.0", "Network host to listen on")
+	fs.StringVar(&config.Host, "host", "127.0.0.1", "Network host to listen on")
 	fs.StringVar(&config.Cluster.Port, "cp", "", "Cluster port from which members can connect.")
 	fs.StringVar(&config.Cluster.Port, "clusterport", "", "Cluster port from which members can connect.")
 	fs.StringVar(&config.Router, "r", "", "Router who maintenance cluster info")
@@ -103,8 +103,8 @@ func ConfigureConfig(args []string) (*Config, error) {
 	fs.StringVar(&config.WsPath, "wspath", "", "path for ws to listen on")
 	fs.StringVar(&configFile, "config", "", "config file for hmq")
 	fs.StringVar(&configFile, "c", "", "config file for hmq")
-	fs.BoolVar(&config.Debug, "debug", false, "enable Debug logging.")
-	fs.BoolVar(&config.Debug, "d", false, "enable Debug logging.")
+	fs.StringVar(&config.Debug, "debug", "info", "enable Debug logging.")
+	fs.StringVar(&config.Debug, "d", "info", "enable Debug logging.")
 
 	fs.Bool("D", true, "enable Debug logging.")
 
@@ -120,7 +120,7 @@ func ConfigureConfig(args []string) (*Config, error) {
 	fs.Visit(func(f *flag.Flag) {
 		switch f.Name {
 		case "D":
-			config.Debug = true
+			config.Debug = "debug"
 		}
 	})
 
@@ -133,7 +133,15 @@ func ConfigureConfig(args []string) (*Config, error) {
 		}
 	}
 
-	if config.Debug {
+	//Set the debug level of logs
+	switch config.Debug {
+	case "debug":
+		log = logger.Debug().Named("broker")
+	case "info":
+		log = logger.Prod().Named("broker")
+	case "release":
+		log = logger.Release().Named("broker")
+	default:
 		log = logger.Debug().Named("broker")
 	}
 
