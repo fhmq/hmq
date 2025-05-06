@@ -1,6 +1,8 @@
 module github.com/fhmq/hmq
 
 go 1.23
+toolchain go1.24.1
+
 require (
 	github.com/Shopify/sarama v1.38.1
 	github.com/bitly/go-simplejson v0.5.0
@@ -14,7 +16,7 @@ require (
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/stretchr/testify v1.8.3
 	go.uber.org/zap v1.24.0
-	golang.org/x/net v0.36.0
+	golang.org/x/net v0.38.0
 )
 
 require (
@@ -56,9 +58,9 @@ require (
 	go.uber.org/atomic v1.7.0 // indirect
 	go.uber.org/multierr v1.6.0 // indirect
 	golang.org/x/arch v0.3.0 // indirect
-	golang.org/x/crypto v0.35.0 // indirect
-	golang.org/x/sys v0.30.0 // indirect
-	golang.org/x/text v0.22.0 // indirect
+	golang.org/x/crypto v0.36.0 // indirect
+	golang.org/x/sys v0.31.0 // indirect
+	golang.org/x/text v0.23.0 // indirect
 	google.golang.org/protobuf v1.33.0 // indirect
 	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
