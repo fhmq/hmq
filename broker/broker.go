@@ -81,10 +81,16 @@ func getAdditionalLogFields(clientIdentifier string, conn net.Conn, additionalFi
 	result = append(result, zap.String("clientID", clientIdentifier))
 
 	// add remote connection address
-	if !wsEnabled && conn != nil && conn.RemoteAddr() != nil {
-		result = append(result, zap.Stringer("addr", conn.RemoteAddr()))
-	} else if wsEnabled && wsConn != nil && wsConn.Request() != nil {
-		result = append(result, zap.String("addr", wsConn.Request().RemoteAddr))
+	if !wsEnabled && conn != nil {
+		if conn.RemoteAddr() != nil {
+			result = append(result, zap.String("addr", conn.RemoteAddr().String()))
+		}
+	} else if wsEnabled && wsConn != nil {
+		if wsConn.Request() != nil {
+			result = append(result, zap.String("addr", wsConn.Request().RemoteAddr))
+		} else {
+			result = append(result, zap.String("addr", wsConn.RemoteAddr().String()))
+		}
 	}
 
 	return result
@@ -143,7 +149,6 @@ func (b *Broker) SubmitWork(clientId string, msg *Message) {
 			ProcessMessage(msg)
 		})
 	}
-
 }
 
 func (b *Broker) Start() {
@@ -156,41 +161,40 @@ func (b *Broker) Start() {
 		go InitHTTPMoniter(b)
 	}
 
-	//listen client over tcp
+	// listen client over tcp
 	if b.config.Port != "" {
 		go b.StartClientListening(false)
 	}
 
-	//listen client over unix
+	// listen client over unix
 	if b.config.Port == "" && b.config.UnixFilePath != "" {
 		go b.StartUnixSocketClientListening(b.config.UnixFilePath, true)
 	}
-	//listen client over windows pipe
+	// listen client over windows pipe
 	if b.config.Port == "" && b.config.UnixFilePath == "" && b.config.WindowsPipeName != "" {
 		go b.StartPipeSocketListening(b.config.WindowsPipeName, true)
 	}
 
-	//listen for cluster
+	// listen for cluster
 	if b.config.Cluster.Port != "" {
 		go b.StartClusterListening()
 	}
 
-	//listen for websocket
+	// listen for websocket
 	if b.config.WsPort != "" {
 		go b.StartWebsocketListening()
 	}
 
-	//listen client over tls
+	// listen client over tls
 	if b.config.TlsPort != "" {
 		go b.StartClientListening(true)
 	}
 
-	//connect on other node in cluster
+	// connect on other node in cluster
 	if b.config.Router != "" {
 		go b.processClusterInfo()
 		b.ConnectToDiscovery()
 	}
-
 }
 
 func (b *Broker) StartWebsocketListening() {
@@ -388,7 +392,7 @@ func (b *Broker) DisConnClientByClientId(clientId string) {
 }
 
 func (b *Broker) handleConnection(typ int, conn net.Conn) error {
-	//process connect packet
+	// process connect packet
 	packet, err := packets.ReadPacket(conn)
 	if err != nil {
 		return errors.New(fmt.Sprintf("read connect packet error:%v", err))
@@ -473,7 +477,7 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) error {
 		}
 		b.clients.Store(cid, c)
 
-		var pubPack = PubPacket{}
+		pubPack := PubPacket{}
 		if willmsg != nil {
 			pubPack.TopicName = info.willMsg.TopicName
 			pubPack.Payload = info.willMsg.Payload
@@ -568,7 +572,6 @@ func (b *Broker) processClusterInfo() {
 		}
 		ProcessMessage(msg)
 	}
-
 }
 
 func (b *Broker) connectRouter(id, addr string) {
@@ -633,7 +636,6 @@ func (b *Broker) connectRouter(id, addr string) {
 
 	go c.readLoop()
 	go c.StartPing()
-
 }
 
 func (b *Broker) checkNodeExist(id, url string) bool {
@@ -646,7 +648,7 @@ func (b *Broker) checkNodeExist(id, url string) bool {
 			return true
 		}
 
-		//skip
+		// skip
 		l, ok := v.(string)
 		if ok {
 			if url == l {
@@ -713,7 +715,6 @@ func (b *Broker) BroadcastInfoMessage(remoteID string, msg *packets.PublishPacke
 }
 
 func (b *Broker) BroadcastSubOrUnsubMessage(packet packets.ControlPacket) {
-
 	b.routes.Range(func(key, value interface{}) bool {
 		if r, ok := value.(*client); ok {
 			r.WriterPacket(packet)
@@ -800,7 +801,7 @@ func (b *Broker) OnlineOfflineNotification(info Info, online bool, lastMsg int64
 	}
 
 	if b, err := encJson.Marshal(msg); err != nil {
-		//This is a TERRIBLE situation, falling back to legacy format to not break API Contract
+		// This is a TERRIBLE situation, falling back to legacy format to not break API Contract
 		packet.Payload = []byte(fmt.Sprintf(`{"clientID":"%s","online":%v,"timestamp":"%s"}`, info.ClientID, online, time.Now().UTC().Format(time.RFC3339)))
 	} else {
 		packet.Payload = b
@@ -818,5 +819,4 @@ func FileExist(name string) bool {
 	} else {
 		panic(err)
 	}
-
 }
