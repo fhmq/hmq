@@ -7,7 +7,7 @@ require (
 	github.com/bitly/go-simplejson v0.5.1
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/eapache/queue v1.1.0
-	github.com/eclipse/paho.mqtt.golang v1.5.0
+	github.com/eclipse/paho.mqtt.golang v1.5.1
 	github.com/gin-gonic/gin v1.10.1
 	github.com/google/uuid v1.3.0
 	github.com/json-iterator/go v1.1.12
