@@ -828,11 +828,12 @@ func (c *client) Close() {
 		Timestamp: time.Now().Unix(),
 	})
 
-	if c.mu.Lock(); c.conn != nil {
+	c.mu.Lock()
+	if c.conn != nil {
 		_ = c.conn.Close()
 		c.conn = nil
-		c.mu.Unlock()
 	}
+	c.mu.Unlock()
 
 	if b == nil {
 		return
@@ -905,13 +906,14 @@ func (c *client) WriterPacket(packet packets.ControlPacket) error {
 	if packet == nil {
 		return nil
 	}
-	if c.conn == nil {
-		c.Close()
-		return errors.New("connect lost ....")
-	}
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	if c.conn == nil {
+		return errors.New("connect lost ....")
+	}
+
 	return packet.Write(c.conn)
 }
 
