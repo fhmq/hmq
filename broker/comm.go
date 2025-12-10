@@ -202,11 +202,13 @@ func (c *client) retryDelivery() {
 	c.inflightMu.RLock()
 	ilen := len(c.inflight)
 
-	if c.mu.Lock(); c.conn == nil || ilen == 0 { //Reset timer when client offline OR inflight is empty
+	c.mu.Lock()
+	if c.conn == nil || ilen == 0 { //Reset timer when client offline OR inflight is empty
 		c.inflightMu.RUnlock()
 		c.mu.Unlock()
 		return
 	}
+	c.mu.Unlock()
 
 	// copy the to be retried elements out of the map to only hold the lock for a short time and use the new slice later to iterate
 	// through them
