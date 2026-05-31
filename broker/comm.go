@@ -199,24 +199,38 @@ func (c *client) resetRetryTimer() {
 
 func (c *client) retryDelivery() {
 	c.resetRetryTimer()
-	c.inflightMu.RLock()
-	ilen := len(c.inflight)
 
 	c.mu.Lock()
-	if c.conn == nil || ilen == 0 { //Reset timer when client offline OR inflight is empty
-		c.inflightMu.RUnlock()
-		c.mu.Unlock()
+	connLost := c.conn == nil
+	c.mu.Unlock()
+	if connLost {
 		return
 	}
-	c.mu.Unlock()
 
-	// copy the to be retried elements out of the map to only hold the lock for a short time and use the new slice later to iterate
-	// through them
-	toRetryEle := make([]*inflightElem, 0, ilen)
-	for _, infEle := range c.inflight {
-		toRetryEle = append(toRetryEle, infEle)
+	c.inflightMu.Lock()
+	ilen := len(c.inflight)
+	if ilen == 0 {
+		c.inflightMu.Unlock()
+		return
 	}
-	c.inflightMu.RUnlock()
+
+	type retryElem struct {
+		id        uint16
+		status    InflightStatus
+		packet    *packets.PublishPacket
+		timestamp int64
+	}
+
+	toRetryEle := make([]retryElem, 0, ilen)
+	for id, infEle := range c.inflight {
+		toRetryEle = append(toRetryEle, retryElem{
+			id:        id,
+			status:    infEle.status,
+			packet:    infEle.packet,
+			timestamp: infEle.timestamp,
+		})
+	}
+	c.inflightMu.Unlock()
 	now := time.Now().Unix()
 
 	for _, infEle := range toRetryEle {
@@ -224,12 +238,12 @@ func (c *client) retryDelivery() {
 		if age >= retryInterval {
 			if infEle.status == Publish {
 				c.WriterPacket(infEle.packet)
-				infEle.timestamp = now
+				c.updateInflightTimestamp(infEle.id, infEle.status, now)
 			} else if infEle.status == Pubrel {
 				pubrel := packets.NewControlPacket(packets.Pubrel).(*packets.PubrelPacket)
 				pubrel.MessageID = infEle.packet.MessageID
 				c.WriterPacket(pubrel)
-				infEle.timestamp = now
+				c.updateInflightTimestamp(infEle.id, infEle.status, now)
 			}
 		} else {
 			if age < 0 {
@@ -239,4 +253,13 @@ func (c *client) retryDelivery() {
 		}
 	}
 	c.ensureRetryTimer()
+}
+
+func (c *client) updateInflightTimestamp(id uint16, status InflightStatus, timestamp int64) {
+	c.inflightMu.Lock()
+	defer c.inflightMu.Unlock()
+
+	if infEle, ok := c.inflight[id]; ok && infEle.status == status {
+		infEle.timestamp = timestamp
+	}
 }

@@ -395,7 +395,7 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) error {
 	// process connect packet
 	packet, err := packets.ReadPacket(conn)
 	if err != nil {
-		return errors.New(fmt.Sprintf("read connect packet error:%v", err))
+		return fmt.Errorf("read connect packet error: %w", err)
 	}
 	if packet == nil {
 		return errors.New("received nil packet")
@@ -413,21 +413,21 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) error {
 
 	if connack.ReturnCode != packets.Accepted {
 		if err := connack.Write(conn); err != nil {
-			return fmt.Errorf("send connack error:%v,clientID:%v,conn:%v", err, msg.ClientIdentifier, conn)
+			return fmt.Errorf("send connack error: %w, clientID: %v, conn: %v", err, msg.ClientIdentifier, conn)
 		}
-		return fmt.Errorf("connect packet validate failed with connack.ReturnCode%v", connack.ReturnCode)
+		return fmt.Errorf("connect packet validate failed with connack.ReturnCode %v", connack.ReturnCode)
 	}
 
 	if typ == CLIENT && !b.CheckConnectAuth(msg.ClientIdentifier, msg.Username, string(msg.Password)) {
 		connack.ReturnCode = packets.ErrRefusedNotAuthorised
 		if err := connack.Write(conn); err != nil {
-			return fmt.Errorf("send connack error:%v,clientID:%v,conn:%v", err, msg.ClientIdentifier, conn)
+			return fmt.Errorf("send connack error: %w, clientID: %v, conn: %v", err, msg.ClientIdentifier, conn)
 		}
-		return fmt.Errorf("connect packet CheckConnectAuth failed with connack.ReturnCode%v", connack.ReturnCode)
+		return fmt.Errorf("connect packet CheckConnectAuth failed with connack.ReturnCode %v", connack.ReturnCode)
 	}
 
 	if err := connack.Write(conn); err != nil {
-		return fmt.Errorf("send connack error:%v,clientID:%v,conn:%v", err, msg.ClientIdentifier, conn)
+		return fmt.Errorf("send connack error: %w, clientID: %v, conn: %v", err, msg.ClientIdentifier, conn)
 	}
 
 	willmsg := packets.NewControlPacket(packets.Publish).(*packets.PublishPacket)
@@ -458,7 +458,7 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) error {
 	c.init()
 
 	if err := b.getSession(c, msg, connack); err != nil {
-		return fmt.Errorf("get session error:%v,clientID:%v,conn:%v", err, msg.ClientIdentifier, conn)
+		return fmt.Errorf("get session error: %w, clientID: %v, conn: %v", err, msg.ClientIdentifier, conn)
 	}
 
 	cid := c.info.clientID

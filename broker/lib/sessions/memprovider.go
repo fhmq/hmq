@@ -53,10 +53,14 @@ func (this *memProvider) Save(id string) error {
 }
 
 func (this *memProvider) Count() int {
+	this.mu.RLock()
+	defer this.mu.RUnlock()
 	return len(this.st)
 }
 
 func (this *memProvider) Close() error {
+	this.mu.Lock()
+	defer this.mu.Unlock()
 	this.st = make(map[string]*Session)
 	return nil
 }

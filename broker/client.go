@@ -1,10 +1,8 @@
 package broker
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"math/rand"
 	"net"
 	"reflect"
 	"regexp"
@@ -132,7 +130,6 @@ type route struct {
 
 var (
 	DisconnectedPacket = packets.NewControlPacket(packets.Disconnect).(*packets.DisconnectPacket)
-	r                  = rand.New(rand.NewSource(time.Now().UnixNano()))
 )
 
 func (c *client) init() {
@@ -229,11 +226,12 @@ func extractPacketFields(msgPacket packets.ControlPacket) []string {
 		break
 
 	case *packets.SubscribePacket:
+		packet := msgPacket.(*packets.SubscribePacket)
+		fields = append(fields, packet.Topics...)
 	case *packets.SubackPacket:
 	case *packets.UnsubscribePacket:
 		packet := msgPacket.(*packets.UnsubscribePacket)
 		fields = append(fields, packet.Topics...)
-		break
 	}
 
 	return fields
@@ -259,7 +257,7 @@ func validatePacketFields(msgPacket packets.ControlPacket) (validFields bool) {
 		// If a receiver (Server or Client) receives a Control Packet containing U+0000
 		// it MUST close the Network Connection
 		// http://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.pdf page 14
-		if bytes.ContainsAny([]byte(field), "\u0000") {
+		if strings.ContainsRune(field, '\u0000') {
 			validFields = false
 			return
 		}
@@ -319,9 +317,8 @@ func ProcessMessage(msg *Message) {
 		c.inflightMu.Unlock()
 	case *packets.PubrecPacket:
 		packet := ca.(*packets.PubrecPacket)
-		c.inflightMu.RLock()
+		c.inflightMu.Lock()
 		ielem, found := c.inflight[packet.MessageID]
-		c.inflightMu.RUnlock()
 		if found {
 			if ielem.status == Publish {
 				ielem.status = Pubrel
@@ -332,6 +329,7 @@ func ProcessMessage(msg *Message) {
 		} else {
 			log.Error("The PUBREC PacketId is not found.", zap.Uint16("MessageID", packet.MessageID))
 		}
+		c.inflightMu.Unlock()
 
 		pubrel := packets.NewControlPacket(packets.Pubrel).(*packets.PubrelPacket)
 		pubrel.MessageID = packet.MessageID
@@ -519,7 +517,7 @@ func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) {
 	}
 
 	if len(qsub) > 0 {
-		idx := r.Intn(len(qsub))
+		idx := int(time.Now().UnixNano() % int64(len(qsub)))
 		sub := c.subs[qsub[idx]].(*subscription)
 		publish(sub, packet)
 	}
@@ -552,7 +550,8 @@ func (c *client) processClientSubscribe(packet *packets.SubscribePacket) {
 
 	suback := packets.NewControlPacket(packets.Suback).(*packets.SubackPacket)
 	suback.MessageID = packet.MessageID
-	var retcodes []byte
+	retcodes := make([]byte, 0, len(subTopics))
+	retainedMsgs := c.rmsgs[:0]
 
 	for i, topic := range subTopics {
 		t := topic
@@ -612,8 +611,9 @@ func (c *client) processClientSubscribe(packet *packets.SubscribePacket) {
 
 		_ = c.session.AddTopic(t, qoss[i])
 		retcodes = append(retcodes, rqos)
-		_ = c.topicsMgr.Retained([]byte(topic), &c.rmsgs)
+		_ = c.topicsMgr.Retained([]byte(topic), &retainedMsgs)
 	}
+	c.rmsgs = retainedMsgs[:0]
 
 	suback.ReturnCodes = retcodes
 
@@ -626,7 +626,7 @@ func (c *client) processClientSubscribe(packet *packets.SubscribePacket) {
 	go b.BroadcastSubOrUnsubMessage(packet)
 
 	//process retain message
-	for _, rm := range c.rmsgs {
+	for _, rm := range retainedMsgs {
 		if err := c.WriterPacket(rm); err != nil {
 			log.Error("Error publishing retained message:", zap.Any("err", err), zap.String("ClientID", c.info.clientID))
 		} else {

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Shopify/sarama"
+	"github.com/IBM/sarama"
 	"go.uber.org/zap"
 )
 
@@ -44,7 +44,7 @@ func InitKafka() *kafka {
 	return c
 }
 
-//connect
+// connect
 func (k *kafka) connect() {
 	conf := sarama.NewConfig()
 	conf.Version = sarama.V1_1_1_0
@@ -62,7 +62,7 @@ func (k *kafka) connect() {
 	k.kafkaClient = kafkaClient
 }
 
-//Publish publish to kafka
+// Publish publish to kafka
 func (k *kafka) Publish(e *Elements) (bool, error) {
 	config := k.kafkaConfig
 	key := e.ClientID

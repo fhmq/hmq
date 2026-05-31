@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"os/signal"
+	"syscall"
 
 	"github.com/fhmq/hmq/broker"
 	"github.com/fhmq/hmq/logger"
@@ -30,7 +31,7 @@ func main() {
 func waitForSignal() os.Signal {
 	signalChan := make(chan os.Signal, 1)
 	defer close(signalChan)
-	signal.Notify(signalChan, os.Kill, os.Interrupt)
+	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
 	s := <-signalChan
 	signal.Stop(signalChan)
 	return s
