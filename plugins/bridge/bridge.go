@@ -1,6 +1,6 @@
 package bridge
 
-import "github.com/fhmq/hmq/logger"
+import "github.com/fhmq/hmq/v3/logger"
 
 const (
 	//Connect mqtt connect
@@ -19,7 +19,7 @@ var (
 	log = logger.Get().Named("bridge")
 )
 
-//Elements kafka publish elements
+// Elements kafka publish elements
 type Elements struct {
 	ClientID  string `json:"clientid"`
 	Username  string `json:"username"`
@@ -41,13 +41,13 @@ type BridgeMQ interface {
 	Publish(e *Elements) (bool, error)
 }
 
-func NewBridgeMQ(name string) BridgeMQ {
+func NewBridgeMQ(name string) (BridgeMQ, error) {
 	switch name {
 	case Kafka:
 		return InitKafka()
 	case CSVLog:
-		return InitCSVLog()
+		return InitCSVLog(), nil
 	default:
-		return &mockMQ{}
+		return &mockMQ{}, nil
 	}
 }

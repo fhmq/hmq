@@ -7,11 +7,24 @@ Golang MQTT Broker, Version 3.1.1, and Compatible
 for [eclipse paho client](https://github.com/eclipse?utf8=%E2%9C%93&q=mqtt&type=&language=) and mosquitto-client
 
 ## RUNNING
+Use Go 1.27.3 or newer to build from source:
+
+The v3 Go module path is `github.com/fhmq/hmq/v3`; previous unversioned imports
+must be updated. Release binaries do not require a Go installation.
+
 ```bash
-$ go get github.com/fhmq/hmq
-$ cd $GOPATH/github.com/fhmq/hmq
-$ go run main.go
+git clone https://github.com/fhmq/hmq.git
+cd hmq
+go build -o hmq .
+./hmq --version
+./hmq --config conf/hmq.config
 ```
+
+Release archives contain the executable, license, sample configuration and
+operational documentation. On Windows use `hmq.exe`. The sample listens only
+on `127.0.0.1:1883`, disables TLS/HTTP/WebSocket ports and uses permissive mock
+authentication for local evaluation. Configure real authentication and TLS
+before exposing the broker to a network; no private keys are bundled.
 
 ## Usage of hmq:
 ~~~
@@ -20,7 +33,7 @@ Usage: hmq [options]
 Broker Options:
     -w,  --worker <number>            Worker num to process message, perfer (client num)/10. (default 1024)
     -p,  --port <port>                Use port for clients (default: 1883)
-         --host <host>                Network host to listen on. (default "0.0.0.0")
+         --host <host>                Network host to listen on. (default "127.0.0.1")
     -ws, --wsport <port>              Use port for websocket monitoring
     -wsp,--wspath <path>              Use path for websocket monitoring
     -c,  --config <file>              Configuration file
@@ -29,46 +42,31 @@ Logging Options:
     -d, --debug <bool>                Enable debugging output (default false)
     -D                                Debug enabled
 
-Cluster Options:
-    -r,  --router  <rurl>             Router who maintenance cluster info
-    -cp, --clusterport <cluster-port> Cluster listen port for others
-
 Common Options:
+         --version                    Show release version and commit
     -h, --help                        Show this message
 ~~~
 
 ### hmq.config
 ~~~
 {
-	"workerNum": 4096,
+	"workerNum": 1024,
 	"port": "1883",
-	"host": "0.0.0.0",
-	"cluster": {
-		"host": "0.0.0.0",
-		"port": "1993"
-	},
-	"router": "127.0.0.1:9888",
-	"wsPort": "1888",
+	"host": "127.0.0.1",
+	"wsPort": "",
 	"wsPath": "/ws",
-	"wsTLS": true,
-	"tlsPort": "8883",
-	"tlsHost": "0.0.0.0",
-	"tlsInfo": {
-		"verify": true,
-		"caFile": "tls/ca/cacert.pem",
-		"certFile": "tls/server/cert.pem",
-		"keyFile": "tls/server/key.pem"
-	},
+	"wsTLS": false,
+	"tlsPort": "",
 	"plugins": {
-		"auth": "authhttp",
-		"bridge": "kafka"
+		"auth": "mock",
+		"bridge": "none"
 	}
 }
 ~~~
 
 ### Features and Future
 
-* Supports QOS 0 and 1
+* Default memory mode supports QoS 0, 1 and 2; experimental modes have explicit restrictions.
 
 * Cluster Support
 
@@ -102,15 +100,31 @@ Common Options:
 ~~~
 
 ### Cluster
-```bash
- 1, start router for hmq  (https://github.com/fhmq/router.git)
- 	$ go get github.com/fhmq/router
- 	$ cd $GOPATH/github.com/fhmq/router
- 	$ go run main.go
- 2, config router in hmq.config  ("router": "127.0.0.1:9888")
- 
-```
-Other Version Of Cluster Based On gRPC: [click here](https://github.com/fhmq/rhmq)
+
+Nodes connect directly without a router. See [cluster configuration](conf/cluster.md)
+for the required static peer topology, mutual TLS and node identities. The current
+implementation offers three explicit modes:
+
+* Default direct forwarding is best effort, without durable replay.
+* Experimental reliable mode adds local event/inbox logs and retrying receipt
+  acknowledgments, but no consensus or replicated storage.
+* Experimental quorum mode embeds one fixed Raft partition with majority-commit
+  publication acceptance and authenticated follower-to-leader forwarding. It
+  requires no external coordinator. It is not a full Kafka implementation.
+
+Quorum currently supports ordinary non-retained QoS 0/1 publications and clean,
+online sessions only. QoS 2, retained state, shared subscriptions, bridges and
+replicated/offline MQTT sessions are not supported in this mode. A successful
+PUBACK confirms the publication log, not subscriber receipt. Timeouts and client
+retries can still produce duplicate deliveries. Static full-mesh cluster seeds
+are required for forwarding to any elected leader. See [quorum runtime notes](broker/QUORUM.md)
+for limits, recovery rules and failure semantics before enabling it.
+
+Legacy `router` and cluster `host`/`port` configuration is rejected. Migrate to
+the documented `cluster.listen`, seeds, node identities and TLS settings; upgrade
+all members together. Durable logs are identity-bound and must not be reset or
+mixed independently. There is no automatic migration from the old router or
+memory-only sessions into the new logs.
 
 ### Online/Offline Notification
 ```bash
@@ -142,3 +156,20 @@ Other Version Of Cluster Based On gRPC: [click here](https://github.com/fhmq/rhm
 
 * https://github.com/inovex/mqtt-stresser
 * https://github.com/krylovsk/mqtt-benchmark
+# Local retained persistence
+
+By default retained messages are kept in memory. Set the JSON configuration
+field `retainedLogPath` to a nonempty local log file path to restore retained
+messages on restart, for example `"retainedLogPath": "/var/lib/hmq/retained.log"`.
+The parent directory must already exist. Invalid paths, lock conflicts, corrupt
+logs, and unsupported platforms prevent broker creation; there is no fallback
+to memory. Linux and macOS are supported, subject to the filesystem and sync
+limitations in [storage guarantees](broker/storage/README.md).
+
+This is local storage, not replicated or consensus-backed storage. Cluster
+message forwarding does not provide durable replication or reconciliation.
+Only retained messages are persisted, not subscriptions or sessions. For a
+retained QoS 1 or 2 publish handled by the broker, the local retained update is
+written before PUBACK or PUBREC; a storage error closes the connection without
+that success acknowledgement. This does not guarantee cluster replication or
+delivery to subscribers, and a bridge can consume a publish before this path.

@@ -1,13 +1,16 @@
 package broker
 
 import (
+	"errors"
+	"fmt"
+	"net"
 	"reflect"
 	"time"
 
 	jsoniter "github.com/json-iterator/go"
-	"go.uber.org/zap"
 
 	"github.com/eclipse/paho.mqtt.golang/packets"
+	"github.com/fhmq/hmq/v3/broker/lib/sessions"
 	uuid "github.com/google/uuid"
 )
 
@@ -16,8 +19,6 @@ const (
 	ACCEPT_MIN_SLEEP = 100 * time.Millisecond
 	// ACCEPT_MAX_SLEEP is the maximum acceptable sleep times on temporary errors
 	ACCEPT_MAX_SLEEP = 10 * time.Second
-	// DEFAULT_ROUTE_CONNECT Route solicitation intervals.
-	DEFAULT_ROUTE_CONNECT = 5 * time.Second
 	// DEFAULT_TLS_TIMEOUT
 	DEFAULT_TLS_TIMEOUT = 5 * time.Second
 )
@@ -90,28 +91,6 @@ func equal(k1, k2 interface{}) bool {
 	return false
 }
 
-func addSubMap(m map[string]uint64, topic string) {
-	subNum, exist := m[topic]
-	if exist {
-		m[topic] = subNum + 1
-	} else {
-		m[topic] = 1
-	}
-}
-
-func delSubMap(m map[string]uint64, topic string) uint64 {
-	subNum, exist := m[topic]
-	if exist {
-		if subNum > 1 {
-			m[topic] = subNum - 1
-			return subNum - 1
-		}
-	} else {
-		m[topic] = 0
-	}
-	return 0
-}
-
 func GenUniqueId() string {
 	id, err := uuid.NewRandom()
 	if err != nil {
@@ -139,25 +118,92 @@ func unWrapPublishPacket(packet *packets.PublishPacket) *packets.PublishPacket {
 	return p
 }
 
-func publish(sub *subscription, packet *packets.PublishPacket) {
+var ErrPacketIDExhausted = errors.New("outbound packet IDs exhausted")
+var ErrInvalidDeliveryQoS = errors.New("invalid outbound delivery QoS")
+var errDurableAccepted = errors.New("delivery durably accepted")
+
+func publish(sub *subscription, original *packets.PublishPacket, qos byte) error {
+	return publishDelivery(sub, original, qos, false)
+}
+
+func publishDelivery(sub *subscription, original *packets.PublishPacket, qos byte, retained bool) error {
+	if retained && sub.client.durable() {
+		unlock := sub.client.broker.lockClientConnect(sub.client.info.clientID)
+		defer unlock()
+		current, ok := sub.client.broker.clients.Load(sub.client.info.clientID)
+		if !ok || current != sub.client {
+			return errors.Join(net.ErrClosed, errWriteNotStarted)
+		}
+	}
+	packet := original.Copy()
+	packet.Qos = qos
+	packet.Dup = false
+	packet.Retain = retained
+	packet.MessageID = 0
+	if sub.client.durable() && (qos == 1 || qos == 2) {
+		return sub.client.enqueueSessionDelivery(packet)
+	}
 	switch packet.Qos {
 	case QosAtMostOnce:
-		err := sub.client.WriterPacket(packet)
-		if err != nil {
-			log.Error("process message for psub error,  ", zap.Error(err))
-		}
+		return sub.client.WriterPacket(packet)
 	case QosAtLeastOnce, QosExactlyOnce:
+		sub.client.outboundSendMu.Lock()
+		defer sub.client.outboundSendMu.Unlock()
+		sub.client.stateMu.Lock()
+		if sub.client.status == Disconnected {
+			sub.client.stateMu.Unlock()
+			return errors.Join(net.ErrClosed, errWriteNotStarted)
+		}
 		sub.client.inflightMu.Lock()
+		for id := 1; id <= 65535; id++ {
+			if _, used := sub.client.inflight[uint16(id)]; !used {
+				packet.MessageID = uint16(id)
+				break
+			}
+		}
+		if packet.MessageID == 0 {
+			sub.client.inflightMu.Unlock()
+			sub.client.stateMu.Unlock()
+			return ErrPacketIDExhausted
+		}
 		sub.client.inflight[packet.MessageID] = &inflightElem{status: Publish, packet: packet, timestamp: time.Now().Unix()}
+		if sub.client.session != nil && !sub.client.session.UpdateOutbound(sub.client.outboundOwner, packet.MessageID, &sessions.OutboundMessage{Packet: packet}) {
+			delete(sub.client.inflight, packet.MessageID)
+			sub.client.inflightMu.Unlock()
+			sub.client.stateMu.Unlock()
+			return errors.Join(net.ErrClosed, errWriteNotStarted)
+		}
 		sub.client.inflightMu.Unlock()
+		sub.client.stateMu.Unlock()
+		if err := sub.client.persistOutbound(packet.MessageID, &sessions.OutboundMessage{Packet: packet}); err != nil {
+			sub.client.inflightMu.Lock()
+			delete(sub.client.inflight, packet.MessageID)
+			if sub.client.session != nil {
+				sub.client.session.UpdateOutbound(sub.client.outboundOwner, packet.MessageID, nil)
+			}
+			sub.client.inflightMu.Unlock()
+			return err
+		}
+		if sub.client.durable() && sub.client.broker.durableRouteHook != nil {
+			sub.client.broker.durableRouteHook(sub.client.info.clientID, "persisted")
+		}
 		err := sub.client.WriterPacket(packet)
-		if err != nil {
-			log.Error("process message for psub error,  ", zap.Error(err))
+		if sub.share && (errors.Is(err, errWriteNotStarted) || errors.Is(err, errWriteZeroBytes)) {
+			sub.client.inflightMu.Lock()
+			delete(sub.client.inflight, packet.MessageID)
+			if sub.client.session != nil {
+				sub.client.session.UpdateOutbound(sub.client.outboundOwner, packet.MessageID, nil)
+			}
+			sub.client.inflightMu.Unlock()
+			return err
 		}
 		sub.client.ensureRetryTimer()
+		if err != nil && sub.client.durable() {
+			return errors.Join(err, errDurableAccepted)
+		}
+		return err
 	default:
-		log.Error("publish with unknown qos", zap.String("ClientID", sub.client.info.clientID))
-		return
+		return fmt.Errorf("%w: %d", ErrInvalidDeliveryQoS, qos)
 	}
 }
 
@@ -168,6 +214,9 @@ func (c *client) ensureRetryTimer(interval ...int64) {
 	defer c.retryTimerLock.Unlock()
 
 	if c.retryTimer != nil {
+		return
+	}
+	if c.isDisconnected() {
 		return
 	}
 
@@ -216,6 +265,7 @@ func (c *client) retryDelivery() {
 
 	type retryElem struct {
 		id        uint16
+		elem      *inflightElem
 		status    InflightStatus
 		packet    *packets.PublishPacket
 		timestamp int64
@@ -225,6 +275,7 @@ func (c *client) retryDelivery() {
 	for id, infEle := range c.inflight {
 		toRetryEle = append(toRetryEle, retryElem{
 			id:        id,
+			elem:      infEle,
 			status:    infEle.status,
 			packet:    infEle.packet,
 			timestamp: infEle.timestamp,
@@ -236,15 +287,7 @@ func (c *client) retryDelivery() {
 	for _, infEle := range toRetryEle {
 		age := now - infEle.timestamp
 		if age >= retryInterval {
-			if infEle.status == Publish {
-				c.WriterPacket(infEle.packet)
-				c.updateInflightTimestamp(infEle.id, infEle.status, now)
-			} else if infEle.status == Pubrel {
-				pubrel := packets.NewControlPacket(packets.Pubrel).(*packets.PubrelPacket)
-				pubrel.MessageID = infEle.packet.MessageID
-				c.WriterPacket(pubrel)
-				c.updateInflightTimestamp(infEle.id, infEle.status, now)
-			}
+			c.retryInflight(infEle.id, infEle.elem, infEle.status, infEle.packet, now)
 		} else {
 			if age < 0 {
 				age = 0
@@ -255,11 +298,35 @@ func (c *client) retryDelivery() {
 	c.ensureRetryTimer()
 }
 
-func (c *client) updateInflightTimestamp(id uint16, status InflightStatus, timestamp int64) {
+func (c *client) retryInflight(id uint16, expected *inflightElem, status InflightStatus, original *packets.PublishPacket, now int64) {
+	c.outboundSendMu.Lock()
+	defer c.outboundSendMu.Unlock()
+	c.inflightMu.RLock()
+	current := c.inflight[id]
+	valid := current == expected && current != nil && current.status == status
+	c.inflightMu.RUnlock()
+	if !valid {
+		return
+	}
+	if status == Publish {
+		packet := *original
+		packet.Dup = true
+		_ = c.WriterPacket(&packet)
+	} else if status == Pubrel {
+		pubrel := packets.NewControlPacket(packets.Pubrel).(*packets.PubrelPacket)
+		pubrel.MessageID = original.MessageID
+		_ = c.WriterPacket(pubrel)
+	} else {
+		return
+	}
+	c.updateInflightTimestamp(id, expected, status, now)
+}
+
+func (c *client) updateInflightTimestamp(id uint16, expected *inflightElem, status InflightStatus, timestamp int64) {
 	c.inflightMu.Lock()
 	defer c.inflightMu.Unlock()
 
-	if infEle, ok := c.inflight[id]; ok && infEle.status == status {
+	if infEle, ok := c.inflight[id]; ok && infEle == expected && infEle.status == status {
 		infEle.timestamp = timestamp
 	}
 }

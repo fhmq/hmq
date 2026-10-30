@@ -1,12 +1,17 @@
-FROM golang:1.18 as builder
-WORKDIR /go/src/github.com/fhmq/hmq
+FROM golang:1.27.3 AS builder
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -o hmq -a -ldflags '-extldflags "-static"' .
+RUN CGO_ENABLED=0 go build -mod=readonly -trimpath -buildvcs=false -ldflags='-s -w' -o /out/hmq .
+RUN mkdir -p /out/rootfs/data /out/rootfs/tmp && chmod 1777 /out/rootfs/tmp
 
-
-FROM alpine:3.17.3
-WORKDIR /
-COPY --from=builder /go/src/github.com/fhmq/hmq/hmq .
+FROM scratch
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=builder --chown=65532:65532 /out/rootfs/ /
+COPY --from=builder /out/hmq /hmq
+WORKDIR /data
+USER 65532:65532
 EXPOSE 1883
-
 ENTRYPOINT ["/hmq"]
+CMD ["--host", "0.0.0.0", "--port", "1883"]

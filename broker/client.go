@@ -3,7 +3,9 @@ package broker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
+	"os"
 	"reflect"
 	"regexp"
 	"strings"
@@ -13,23 +15,16 @@ import (
 
 	"github.com/eapache/queue"
 	"github.com/eclipse/paho.mqtt.golang/packets"
-	"github.com/fhmq/hmq/broker/lib/sessions"
-	"github.com/fhmq/hmq/broker/lib/topics"
-	"github.com/fhmq/hmq/plugins/bridge"
+	"github.com/fhmq/hmq/v3/broker/lib/sessions"
+	"github.com/fhmq/hmq/v3/broker/lib/topics"
+	"github.com/fhmq/hmq/v3/plugins/bridge"
 	"go.uber.org/zap"
 	"golang.org/x/net/websocket"
 )
 
 const (
-	// BrokerInfoTopic special pub topic for cluster info
-	BrokerInfoTopic = "broker000100101info"
 	// CLIENT is an end user.
 	CLIENT = 0
-	// ROUTER is another router in the cluster.
-	ROUTER = 1
-	//REMOTE is the router connect to other cluster
-	REMOTE  = 2
-	CLUSTER = 3
 )
 
 const (
@@ -51,33 +46,43 @@ var (
 )
 
 type client struct {
-	typ            int
-	mu             sync.Mutex
-	broker         *Broker
-	conn           net.Conn
-	info           info
-	route          route
-	status         int
-	ctx            context.Context
-	cancelFunc     context.CancelFunc
-	session        *sessions.Session
-	subMap         map[string]*subscription
-	subMapMu       sync.RWMutex
-	topicsMgr      *topics.Manager
-	subs           []interface{}
-	qoss           []byte
-	rmsgs          []*packets.PublishPacket
-	routeSubMap    map[string]uint64
-	routeSubMapMu  sync.Mutex
-	awaitingRel    map[uint16]int64
-	awaitingRelMu  sync.RWMutex
-	maxAwaitingRel int
-	inflight       map[uint16]*inflightElem
-	inflightMu     sync.RWMutex
-	mqueue         *queue.Queue
-	retryTimer     *time.Timer
-	retryTimerLock sync.Mutex
-	lastMsgTime    int64
+	typ              int
+	mu               sync.Mutex
+	writeMu          sync.Mutex
+	outboundSendMu   sync.Mutex
+	writing          bool
+	writeInterrupted bool
+	takeoverWaiters  int
+	stateMu          sync.Mutex
+	closeOnce        sync.Once
+	broker           *Broker
+	conn             net.Conn
+	info             info
+	status           int
+	ctx              context.Context
+	cancelFunc       context.CancelFunc
+	session          *sessions.Session
+	transport        net.Conn
+	outboundOwner    uint64
+	durableEpoch     uint64
+	durableReady     bool     // Guarded by outboundSendMu; replay precedes queue pumping.
+	durableReplayIDs []uint16 // ReadInflight sequence order, populated before owner claim.
+	subMap           map[string]*subscription
+	subMapMu         sync.RWMutex
+	topicsMgr        *topics.Manager
+	subs             []interface{}
+	qoss             []byte
+	rmsgs            []*packets.PublishPacket
+	awaitingRel      map[uint16]int64
+	awaitingRelMu    sync.RWMutex
+	publishMu        sync.Mutex
+	maxAwaitingRel   int
+	inflight         map[uint16]*inflightElem
+	inflightMu       sync.RWMutex
+	mqueue           *queue.Queue
+	retryTimer       *time.Timer
+	retryTimerLock   sync.Mutex
+	lastMsgTime      int64
 }
 
 type InflightStatus uint8
@@ -93,20 +98,19 @@ type inflightElem struct {
 	timestamp int64
 }
 type subscription struct {
-	client    *client
-	topic     string
-	qos       byte
-	share     bool
-	groupName string
+	client     *client
+	topic      string
+	qos        byte
+	share      bool
+	groupName  string
+	generation uint64
 }
 
 type info struct {
 	clientID  string
 	username  string
-	password  []byte
 	keepalive uint16
 	willMsg   *packets.PublishPacket
-	localIP   string
 	remoteIP  string
 }
 
@@ -118,14 +122,8 @@ type PubPacket struct {
 type Info struct {
 	ClientID  string    `json:"clientId"`
 	Username  string    `json:"username"`
-	Password  []byte    `json:"password"`
 	Keepalive uint16    `json:"keepalive"`
 	WillMsg   PubPacket `json:"willMsg"`
-}
-
-type route struct {
-	remoteID  string
-	remoteUrl string
 }
 
 var (
@@ -133,9 +131,9 @@ var (
 )
 
 func (c *client) init() {
+	c.transport = c.conn
 	c.lastMsgTime = time.Now().Unix() //mark the connection packet time as last time messaged
 	c.status = Connected
-	c.info.localIP, _, _ = net.SplitHostPort(c.conn.LocalAddr().String())
 	remoteAddr := c.conn.RemoteAddr()
 	remoteNetwork := remoteAddr.Network()
 	c.info.remoteIP = ""
@@ -148,14 +146,15 @@ func (c *client) init() {
 	c.ctx, c.cancelFunc = context.WithCancel(context.Background())
 	c.subMap = make(map[string]*subscription)
 	c.topicsMgr = c.broker.topicsMgr
-	c.routeSubMap = make(map[string]uint64)
 	c.awaitingRel = make(map[uint16]int64)
 	c.inflight = make(map[uint16]*inflightElem)
 	c.mqueue = queue.New()
 }
 
 func (c *client) readLoop() {
+	c.mu.Lock()
 	nc := c.conn
+	c.mu.Unlock()
 	b := c.broker
 	if nc == nil || b == nil {
 		return
@@ -195,10 +194,14 @@ func (c *client) readLoop() {
 
 			// if packet is disconnect from client, then need to break the read packet loop and clear will msg.
 			if _, isDisconnect := packet.(*packets.DisconnectPacket); isDisconnect {
+				c.stateMu.Lock()
 				c.info.willMsg = nil
+				c.stateMu.Unlock()
 				c.cancelFunc()
 			} else {
+				c.stateMu.Lock()
 				c.lastMsgTime = time.Now().Unix()
+				c.stateMu.Unlock()
 			}
 
 			msg := &Message{
@@ -271,9 +274,26 @@ func validatePacketFields(msgPacket packets.ControlPacket) (validFields bool) {
 
 func ProcessMessage(msg *Message) {
 	c := msg.client
+	closeAfterRoute := false
+	defer func() {
+		if closeAfterRoute {
+			c.Close()
+		}
+	}()
 	ca := msg.packet
 	if ca == nil {
 		return
+	}
+	if c.durable() {
+		switch ca.(type) {
+		case *packets.PubackPacket, *packets.PubrecPacket, *packets.PubcompPacket:
+			unlock := c.broker.lockClientConnect(c.info.clientID)
+			defer unlock()
+			current, ok := c.broker.clients.Load(c.info.clientID)
+			if !ok || current != c {
+				return
+			}
+		}
 	}
 
 	if c.typ == CLIENT {
@@ -289,7 +309,12 @@ func ProcessMessage(msg *Message) {
 		// If a Server or Client receives a Control Packet
 		// containing ill-formed UTF-8 it MUST close the Network Connection
 
-		_ = c.conn.Close()
+		c.mu.Lock()
+		conn := c.conn
+		c.mu.Unlock()
+		if conn != nil {
+			_ = conn.Close()
+		}
 
 		// Update client status
 		//c.status = Disconnected
@@ -308,19 +333,48 @@ func ProcessMessage(msg *Message) {
 		c.ProcessPublish(packet)
 	case *packets.PubackPacket:
 		packet := ca.(*packets.PubackPacket)
+		c.outboundSendMu.Lock()
 		c.inflightMu.Lock()
-		if _, found := c.inflight[packet.MessageID]; found {
+		if elem, found := c.inflight[packet.MessageID]; found && elem.packet.Qos == QosAtLeastOnce && elem.status == Publish {
+			if err := c.persistOutbound(packet.MessageID, nil); err != nil {
+				c.inflightMu.Unlock()
+				c.outboundSendMu.Unlock()
+				closeAfterRoute = true
+				return
+			}
+			if c.session != nil {
+				c.session.UpdateOutbound(c.outboundOwner, packet.MessageID, nil)
+			}
 			delete(c.inflight, packet.MessageID)
 		} else {
 			log.Error("Duplicated PUBACK PacketId", zap.Uint16("MessageID", packet.MessageID))
 		}
 		c.inflightMu.Unlock()
+		c.outboundSendMu.Unlock()
+		if c.durable() {
+			if err := c.pumpSessionQueue(); err != nil {
+				closeAfterRoute = true
+			}
+		}
 	case *packets.PubrecPacket:
 		packet := ca.(*packets.PubrecPacket)
+		c.outboundSendMu.Lock()
 		c.inflightMu.Lock()
 		ielem, found := c.inflight[packet.MessageID]
-		if found {
+		valid := found && ielem.packet.Qos == QosExactlyOnce
+		if valid {
+			if c.session != nil {
+				valid = c.session.UpdateOutbound(c.outboundOwner, packet.MessageID, &sessions.OutboundMessage{Packet: ielem.packet, AwaitingPubcomp: true})
+			}
+		}
+		if valid {
 			if ielem.status == Publish {
+				if err := c.persistOutbound(packet.MessageID, &sessions.OutboundMessage{Packet: ielem.packet, AwaitingPubcomp: true}); err != nil {
+					c.inflightMu.Unlock()
+					c.outboundSendMu.Unlock()
+					closeAfterRoute = true
+					return
+				}
 				ielem.status = Pubrel
 				ielem.timestamp = time.Now().Unix()
 			} else if ielem.status == Pubrel {
@@ -330,14 +384,24 @@ func ProcessMessage(msg *Message) {
 			log.Error("The PUBREC PacketId is not found.", zap.Uint16("MessageID", packet.MessageID))
 		}
 		c.inflightMu.Unlock()
+		if !valid {
+			c.outboundSendMu.Unlock()
+			return
+		}
 
 		pubrel := packets.NewControlPacket(packets.Pubrel).(*packets.PubrelPacket)
 		pubrel.MessageID = packet.MessageID
-		if err := c.WriterPacket(pubrel); err != nil {
+		err := c.WriterPacket(pubrel)
+		c.outboundSendMu.Unlock()
+		if err != nil {
 			log.Error("send pubrel error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 			return
 		}
 	case *packets.PubrelPacket:
+		if c.broker.quorumEnabled() {
+			closeAfterRoute = true
+			return
+		}
 		packet := ca.(*packets.PubrelPacket)
 		_ = c.pubRel(packet.MessageID)
 		pubcomp := packets.NewControlPacket(packets.Pubcomp).(*packets.PubcompPacket)
@@ -348,9 +412,27 @@ func ProcessMessage(msg *Message) {
 		}
 	case *packets.PubcompPacket:
 		packet := ca.(*packets.PubcompPacket)
+		c.outboundSendMu.Lock()
 		c.inflightMu.Lock()
-		delete(c.inflight, packet.MessageID)
+		if elem, found := c.inflight[packet.MessageID]; found && elem.packet.Qos == QosExactlyOnce && elem.status == Pubrel {
+			if err := c.persistOutbound(packet.MessageID, nil); err != nil {
+				c.inflightMu.Unlock()
+				c.outboundSendMu.Unlock()
+				closeAfterRoute = true
+				return
+			}
+			if c.session != nil {
+				c.session.UpdateOutbound(c.outboundOwner, packet.MessageID, nil)
+			}
+			delete(c.inflight, packet.MessageID)
+		}
 		c.inflightMu.Unlock()
+		c.outboundSendMu.Unlock()
+		if c.durable() {
+			if err := c.pumpSessionQueue(); err != nil {
+				closeAfterRoute = true
+			}
+		}
 	case *packets.SubscribePacket:
 		packet := ca.(*packets.SubscribePacket)
 		c.ProcessSubscribe(packet)
@@ -370,62 +452,52 @@ func ProcessMessage(msg *Message) {
 }
 
 func (c *client) ProcessPublish(packet *packets.PublishPacket) {
-	switch c.typ {
-	case CLIENT:
-		c.processClientPublish(packet)
-	case ROUTER:
-		c.processRouterPublish(packet)
-	case CLUSTER:
-		c.processRemotePublish(packet)
-	}
-
-}
-
-func (c *client) processRemotePublish(packet *packets.PublishPacket) {
-	if c.status == Disconnected {
-		return
-	}
-
-	topic := packet.TopicName
-	if topic == BrokerInfoTopic {
-		c.ProcessInfo(packet)
-		return
-	}
-
-}
-
-func (c *client) processRouterPublish(packet *packets.PublishPacket) {
-	if c.status == Disconnected {
-		return
-	}
-
-	switch packet.Qos {
-	case QosAtMostOnce:
-		c.ProcessPublishMessage(packet)
-	case QosAtLeastOnce:
-		puback := packets.NewControlPacket(packets.Puback).(*packets.PubackPacket)
-		puback.MessageID = packet.MessageID
-		if err := c.WriterPacket(puback); err != nil {
-			log.Error("send puback error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
-			return
-		}
-		c.ProcessPublishMessage(packet)
-	case QosExactlyOnce:
-		return
-	default:
-		log.Error("publish with unknown qos", zap.String("ClientID", c.info.clientID))
-		return
-	}
-
+	c.processClientPublish(packet)
 }
 
 func (c *client) processClientPublish(packet *packets.PublishPacket) {
+	if c.broker.quorumEnabled() {
+		c.processQuorumPublish(packet)
+		return
+	}
+	if c.broker.sessionLog != nil && c.typ == CLIENT && packet.Qos == QosExactlyOnce {
+		c.Close()
+		return
+	}
+	c.publishMu.Lock()
+	defer c.publishMu.Unlock()
 
 	topic := packet.TopicName
 
 	if !c.broker.CheckTopicAuth(PUB, c.info.clientID, c.info.username, c.info.remoteIP, topic) {
 		log.Error("Pub Topics Auth failed, ", zap.String("topic", topic), zap.String("ClientID", c.info.clientID))
 		return
+	}
+	registered := false
+	defer func() {
+		if registered {
+			if c.session != nil {
+				c.session.RemoveAwaitingRel(packet.MessageID)
+				return
+			}
+			c.awaitingRelMu.Lock()
+			delete(c.awaitingRel, packet.MessageID)
+			c.awaitingRelMu.Unlock()
+		}
+	}()
+	if packet.Qos == QosExactlyOnce {
+		err := c.registerPublishPacketId(packet.MessageID)
+		if err != nil && err.Error() != "RC_PACKET_IDENTIFIER_IN_USE" {
+			c.Close()
+			return
+		}
+		if err != nil {
+			pubrec := packets.NewControlPacket(packets.Pubrec).(*packets.PubrecPacket)
+			pubrec.MessageID = packet.MessageID
+			_ = c.WriterPacket(pubrec)
+			return
+		}
+		registered = true
 	}
 
 	//publish to bridge mq
@@ -438,13 +510,31 @@ func (c *client) processClientPublish(packet *packets.PublishPacket) {
 		Topic:     topic,
 	})
 
-	if cost {
+	if cost && packet.Qos == QosAtMostOnce {
 		return
+	}
+	if !cost && packet.Retain {
+		if err := c.topicsMgr.Retain(packet); err != nil {
+			log.Error("Error retaining message", zap.Error(err), zap.String("ClientID", c.info.clientID))
+			c.Close()
+			return
+		}
+	}
+	if !cost {
+		if err := c.forwardPublishMessage(packet); err != nil {
+			log.Error("forward publish", zap.Error(err), zap.String("ClientID", c.info.clientID))
+			c.Close()
+			return
+		}
+		if err := c.broker.publishLocal(packet); err != nil {
+			log.Error("local publish", zap.Error(err), zap.String("ClientID", c.info.clientID))
+			c.Close()
+			return
+		}
 	}
 
 	switch packet.Qos {
 	case QosAtMostOnce:
-		c.ProcessPublishMessage(packet)
 	case QosAtLeastOnce:
 		puback := packets.NewControlPacket(packets.Puback).(*packets.PubackPacket)
 		puback.MessageID = packet.MessageID
@@ -452,18 +542,15 @@ func (c *client) processClientPublish(packet *packets.PublishPacket) {
 			log.Error("send puback error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 			return
 		}
-		c.ProcessPublishMessage(packet)
 	case QosExactlyOnce:
-		if err := c.registerPublishPacketId(packet.MessageID); err != nil {
-			return
-		} else {
+		registered = false
+		{
 			pubrec := packets.NewControlPacket(packets.Pubrec).(*packets.PubrecPacket)
 			pubrec.MessageID = packet.MessageID
 			if err := c.WriterPacket(pubrec); err != nil {
 				log.Error("send pubrec error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 				return
 			}
-			c.ProcessPublishMessage(packet)
 		}
 		return
 	default:
@@ -473,70 +560,38 @@ func (c *client) processClientPublish(packet *packets.PublishPacket) {
 
 }
 
-func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) {
+func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) error {
+	if c.broker.quorumEnabled() {
+		return c.broker.PublishMessage(packet)
+	}
+	if err := c.forwardPublishMessage(packet); err != nil {
+		log.Error("forward publish", zap.Error(err))
+		return err
+	}
+	if c.broker != nil {
+		return c.broker.publishLocal(packet)
+	}
+	return nil
+}
 
+func (c *client) forwardPublishMessage(packet *packets.PublishPacket) error {
 	b := c.broker
 	if b == nil {
-		return
+		return nil
 	}
 	typ := c.typ
-
-	if packet.Retain {
-		if err := c.topicsMgr.Retain(packet); err != nil {
-			log.Error("Error retaining message: ", zap.Error(err), zap.String("ClientID", c.info.clientID))
-		}
+	if typ == CLIENT {
+		return b.forwardMessage(packet)
 	}
-
-	err := c.topicsMgr.Subscribers([]byte(packet.TopicName), packet.Qos, &c.subs, &c.qoss)
-	if err != nil {
-		log.Error("Error retrieving subscribers list: ", zap.String("ClientID", c.info.clientID))
-		return
-	}
-
-	if len(c.subs) == 0 {
-		return
-	}
-
-	var qsub []int
-	for i, sub := range c.subs {
-		s, ok := sub.(*subscription)
-		if ok {
-			if s.client.typ == ROUTER {
-				if typ != CLIENT {
-					continue
-				}
-			}
-			if s.share {
-				qsub = append(qsub, i)
-			} else {
-				publish(s, packet)
-			}
-
-		}
-
-	}
-
-	if len(qsub) > 0 {
-		idx := int(time.Now().UnixNano() % int64(len(qsub)))
-		sub := c.subs[qsub[idx]].(*subscription)
-		publish(sub, packet)
-	}
-
+	return nil
 }
 
 func (c *client) ProcessSubscribe(packet *packets.SubscribePacket) {
-	switch c.typ {
-	case CLIENT:
-		c.processClientSubscribe(packet)
-	case ROUTER:
-		fallthrough
-	case REMOTE:
-		c.processRouterSubscribe(packet)
-	}
+	c.processClientSubscribe(packet)
 }
 
 func (c *client) processClientSubscribe(packet *packets.SubscribePacket) {
-	if c.status == Disconnected {
+	if c.isDisconnected() {
 		return
 	}
 
@@ -551,10 +606,18 @@ func (c *client) processClientSubscribe(packet *packets.SubscribePacket) {
 	suback := packets.NewControlPacket(packets.Suback).(*packets.SubackPacket)
 	suback.MessageID = packet.MessageID
 	retcodes := make([]byte, 0, len(subTopics))
-	retainedMsgs := c.rmsgs[:0]
+	type retainedDelivery struct {
+		packet *packets.PublishPacket
+		sub    *subscription
+	}
+	var retainedMsgs []retainedDelivery
 
 	for i, topic := range subTopics {
 		t := topic
+		if (c.durable() || b.quorumEnabled()) && strings.HasPrefix(topic, "$share/") || (b.quorumEnabled() && qoss[i] > 1) {
+			retcodes = append(retcodes, QosFailure)
+			continue
+		}
 		//check topic auth for client
 		if !b.CheckTopicAuth(SUB, c.info.clientID, c.info.username, c.info.remoteIP, topic) {
 			log.Error("Sub topic Auth failed: ", zap.String("topic", topic), zap.String("ClientID", c.info.clientID))
@@ -583,37 +646,58 @@ func (c *client) processClientSubscribe(packet *packets.SubscribePacket) {
 			topic = substr[2]
 		}
 
+		c.stateMu.Lock()
+		if c.status == Disconnected {
+			c.stateMu.Unlock()
+			return
+		}
 		c.subMapMu.Lock()
+		if err := c.persistFilter(t, &qoss[i]); err != nil {
+			c.subMapMu.Unlock()
+			c.stateMu.Unlock()
+			c.Close()
+			return
+		}
+		generation := sessions.NewSubscriptionGeneration()
 		if oldSub, exist := c.subMap[t]; exist {
+			generation = oldSub.generation
 			_ = c.topicsMgr.Unsubscribe([]byte(oldSub.topic), oldSub)
 			delete(c.subMap, t)
 		}
-		c.subMapMu.Unlock()
 
 		sub := &subscription{
-			topic:     topic,
-			qos:       qoss[i],
-			client:    c,
-			share:     share,
-			groupName: groupName,
+			topic:      topic,
+			qos:        qoss[i],
+			client:     c,
+			share:      share,
+			groupName:  groupName,
+			generation: generation,
 		}
 
 		rqos, err := c.topicsMgr.Subscribe([]byte(topic), qoss[i], sub)
 		if err != nil {
+			c.subMapMu.Unlock()
+			c.stateMu.Unlock()
 			log.Error("subscribe error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 			retcodes = append(retcodes, QosFailure)
 			continue
 		}
 
-		c.subMapMu.Lock()
 		c.subMap[t] = sub
+		_ = c.session.AddTopicGeneration(t, qoss[i], generation)
 		c.subMapMu.Unlock()
-
-		_ = c.session.AddTopic(t, qoss[i])
+		c.stateMu.Unlock()
 		retcodes = append(retcodes, rqos)
-		_ = c.topicsMgr.Retained([]byte(topic), &retainedMsgs)
+		var matches []*packets.PublishPacket
+		if err := c.topicsMgr.Retained([]byte(topic), &matches); err != nil {
+			log.Error("read retained messages", zap.Error(err), zap.String("ClientID", c.info.clientID))
+			c.Close()
+			return
+		}
+		for _, msg := range matches {
+			retainedMsgs = append(retainedMsgs, retainedDelivery{msg, sub})
+		}
 	}
-	c.rmsgs = retainedMsgs[:0]
 
 	suback.ReturnCodes = retcodes
 
@@ -622,134 +706,49 @@ func (c *client) processClientSubscribe(packet *packets.SubscribePacket) {
 		log.Error("send suback error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 		return
 	}
-	//broadcast subscribe message
-	go b.BroadcastSubOrUnsubMessage(packet)
 
 	//process retain message
 	for _, rm := range retainedMsgs {
-		if err := c.WriterPacket(rm); err != nil {
-			log.Error("Error publishing retained message:", zap.Any("err", err), zap.String("ClientID", c.info.clientID))
-		} else {
-			log.Info("process retain  message: ", zap.Any("packet", packet), zap.String("ClientID", c.info.clientID))
+		qos := rm.packet.Qos
+		if rm.sub.qos < qos {
+			qos = rm.sub.qos
+		}
+		if err := publishDelivery(rm.sub, rm.packet, qos, true); err != nil {
+			log.Error("deliver retained message", zap.Error(err), zap.String("ClientID", c.info.clientID))
 		}
 	}
 }
 
-func (c *client) processRouterSubscribe(packet *packets.SubscribePacket) {
-	if c.status == Disconnected {
-		return
-	}
-
-	b := c.broker
-	if b == nil {
-		return
-	}
-
-	subTopics := packet.Topics
-	qoss := packet.Qoss
-
-	suback := packets.NewControlPacket(packets.Suback).(*packets.SubackPacket)
-	suback.MessageID = packet.MessageID
-	var retcodes []byte
-
-	for i, topic := range subTopics {
-		t := topic
-		groupName := ""
-		share := false
-		if strings.HasPrefix(topic, "$share/") {
-			substr := groupCompile.FindStringSubmatch(topic)
-			if len(substr) != 3 {
-				retcodes = append(retcodes, QosFailure)
-				continue
-			}
-			share = true
-			groupName = substr[1]
-			topic = substr[2]
-		}
-
-		sub := &subscription{
-			topic:     topic,
-			qos:       qoss[i],
-			client:    c,
-			share:     share,
-			groupName: groupName,
-		}
-
-		rqos, err := c.topicsMgr.Subscribe([]byte(topic), qoss[i], sub)
-		if err != nil {
-			log.Error("subscribe error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
-			retcodes = append(retcodes, QosFailure)
-			continue
-		}
-
-		c.subMapMu.Lock()
-		c.subMap[t] = sub
-		c.subMapMu.Unlock()
-
-		c.routeSubMapMu.Lock()
-		addSubMap(c.routeSubMap, topic)
-		c.routeSubMapMu.Unlock()
-		retcodes = append(retcodes, rqos)
-	}
-
-	suback.ReturnCodes = retcodes
-
-	err := c.WriterPacket(suback)
+// restoreSubscriptions reattaches saved filters without replaying retained messages.
+func (c *client) restoreSubscriptions() error {
+	filters, qoss, err := c.session.Topics()
 	if err != nil {
-		log.Error("send suback error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
-		return
+		return err
 	}
+	for i, filter := range filters {
+		topic, group, shared := filter, "", false
+		if strings.HasPrefix(filter, "$share/") {
+			parts := groupCompile.FindStringSubmatch(filter)
+			if len(parts) != 3 {
+				return fmt.Errorf("invalid saved shared subscription %q", filter)
+			}
+			topic, group, shared = parts[2], parts[1], true
+		}
+		sub := &subscription{client: c, topic: topic, qos: qoss[i], share: shared, groupName: group, generation: c.session.TopicGeneration(filter)}
+		if _, err := c.topicsMgr.Subscribe([]byte(topic), qoss[i], sub); err != nil {
+			return err
+		}
+		c.subMap[filter] = sub
+	}
+	return nil
 }
 
 func (c *client) ProcessUnSubscribe(packet *packets.UnsubscribePacket) {
-	switch c.typ {
-	case CLIENT:
-		c.processClientUnSubscribe(packet)
-	case ROUTER:
-		c.processRouterUnSubscribe(packet)
-	}
-}
-
-func (c *client) processRouterUnSubscribe(packet *packets.UnsubscribePacket) {
-	if c.status == Disconnected {
-		return
-	}
-	b := c.broker
-	if b == nil {
-		return
-	}
-
-	unSubTopics := packet.Topics
-
-	for _, topic := range unSubTopics {
-		c.subMapMu.Lock()
-		if sub, exist := c.subMap[topic]; exist {
-			c.routeSubMapMu.Lock()
-			if retainNum := delSubMap(c.routeSubMap, topic); retainNum > 0 {
-				c.routeSubMapMu.Unlock()
-				c.subMapMu.Unlock()
-				continue
-			}
-			c.routeSubMapMu.Unlock()
-
-			_ = c.topicsMgr.Unsubscribe([]byte(sub.topic), sub)
-			delete(c.subMap, topic)
-		}
-		c.subMapMu.Unlock()
-	}
-
-	unsuback := packets.NewControlPacket(packets.Unsuback).(*packets.UnsubackPacket)
-	unsuback.MessageID = packet.MessageID
-
-	err := c.WriterPacket(unsuback)
-	if err != nil {
-		log.Error("send unsuback error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
-		return
-	}
+	c.processClientUnSubscribe(packet)
 }
 
 func (c *client) processClientUnSubscribe(packet *packets.UnsubscribePacket) {
-	if c.status == Disconnected {
+	if c.isDisconnected() {
 		return
 	}
 	b := c.broker
@@ -773,14 +772,26 @@ func (c *client) processClientUnSubscribe(packet *packets.UnsubscribePacket) {
 
 		}
 
+		c.stateMu.Lock()
+		if c.status == Disconnected {
+			c.stateMu.Unlock()
+			return
+		}
 		c.subMapMu.Lock()
 		sub, exist := c.subMap[topic]
 		if exist {
+			if err := c.persistFilter(topic, nil); err != nil {
+				c.subMapMu.Unlock()
+				c.stateMu.Unlock()
+				c.Close()
+				return
+			}
 			_ = c.topicsMgr.Unsubscribe([]byte(sub.topic), sub)
 			_ = c.session.RemoveTopic(topic)
 			delete(c.subMap, topic)
 		}
 		c.subMapMu.Unlock()
+		c.stateMu.Unlock()
 
 	}
 
@@ -792,12 +803,10 @@ func (c *client) processClientUnSubscribe(packet *packets.UnsubscribePacket) {
 		log.Error("send unsuback error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 		return
 	}
-	// //process ubsubscribe message
-	b.BroadcastSubOrUnsubMessage(packet)
 }
 
 func (c *client) ProcessPing() {
-	if c.status == Disconnected {
+	if c.isDisconnected() {
 		return
 	}
 	resp := packets.NewControlPacket(packets.Pingresp).(*packets.PingrespPacket)
@@ -809,44 +818,67 @@ func (c *client) ProcessPing() {
 }
 
 func (c *client) Close() {
-	if c.status == Disconnected {
-		return
+	if notify := c.detach(); notify != nil {
+		notify()
+	}
+}
+
+func (c *client) detach() (notify func()) {
+	c.closeOnce.Do(func() { notify = c.close() })
+	return notify
+}
+
+func (c *client) isDisconnected() bool {
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
+	return c.status == Disconnected
+}
+
+func (c *client) close() func() {
+	if c.cancelFunc != nil {
+		c.cancelFunc()
 	}
 
-	c.cancelFunc()
-
+	c.stateMu.Lock()
 	c.status = Disconnected
+	willMsg, lastMsgTime := c.info.willMsg, c.lastMsgTime
+	c.stateMu.Unlock()
+	c.retryTimerLock.Lock()
+	if c.retryTimer != nil {
+		c.retryTimer.Stop()
+		c.retryTimer = nil
+	}
+	c.retryTimerLock.Unlock()
+	c.inflightMu.Lock()
+	clear(c.inflight)
+	c.inflightMu.Unlock()
 	//wait for message complete
 	// time.Sleep(1 * time.Second)
 	// c.status = Disconnected
 
 	b := c.broker
-	b.Publish(&bridge.Elements{
-		ClientID:  c.info.clientID,
-		Username:  c.info.username,
-		Action:    bridge.Disconnect,
-		Timestamp: time.Now().Unix(),
-	})
 
 	c.mu.Lock()
-	if c.conn != nil {
-		_ = c.conn.Close()
-		c.conn = nil
-	}
+	conn := c.conn
+	c.conn = nil
 	c.mu.Unlock()
 
 	if b == nil {
-		return
+		return func() {
+			if c.transport != nil {
+				_ = c.transport.Close()
+			}
+			if conn != nil {
+				_ = conn.Close()
+			}
+		}
 	}
 
 	b.removeClient(c)
 
 	c.subMapMu.RLock()
-	defer c.subMapMu.RUnlock()
 
-	unSubTopics := make([]string, 0)
-	for topic, sub := range c.subMap {
-		unSubTopics = append(unSubTopics, topic)
+	for _, sub := range c.subMap {
 
 		// guard against race condition where a client gets Close() but wasn't initialized yet fully
 		if sub == nil || b.topicsMgr == nil {
@@ -857,83 +889,151 @@ func (c *client) Close() {
 			log.Error("unsubscribe error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 		}
 	}
+	c.subMapMu.RUnlock()
 
-	if c.typ == CLIENT {
-		b.BroadcastUnSubscribe(unSubTopics)
+	return func() {
+		if c.transport != nil {
+			_ = c.transport.Close()
+		}
+		if conn != nil {
+			_ = conn.Close()
+		}
+		b.Publish(&bridge.Elements{ClientID: c.info.clientID, Username: c.info.username, Action: bridge.Disconnect, Timestamp: time.Now().Unix()})
+		if c.typ == CLIENT {
+			var pubPack = PubPacket{}
+			if willMsg != nil {
+				pubPack.TopicName = willMsg.TopicName
+				pubPack.Payload = willMsg.Payload
+			}
 
-		var pubPack = PubPacket{}
-		if c.info.willMsg != nil {
-			pubPack.TopicName = c.info.willMsg.TopicName
-			pubPack.Payload = c.info.willMsg.Payload
+			pubInfo := Info{
+				ClientID:  c.info.clientID,
+				Username:  c.info.username,
+				Keepalive: c.info.keepalive,
+				WillMsg:   pubPack,
+			}
+			//offline notification
+			b.OnlineOfflineNotification(pubInfo, false, lastMsgTime)
 		}
 
-		pubInfo := Info{
-			ClientID:  c.info.clientID,
-			Username:  c.info.username,
-			Password:  c.info.password,
-			Keepalive: c.info.keepalive,
-			WillMsg:   pubPack,
+		if willMsg != nil {
+			b.PublishMessage(willMsg)
 		}
-		//offline notification
-		b.OnlineOfflineNotification(pubInfo, false, c.lastMsgTime)
-	}
-
-	if c.info.willMsg != nil {
-		b.PublishMessage(c.info.willMsg)
-	}
-
-	if c.typ == CLUSTER {
-		b.ConnectToDiscovery()
-	}
-
-	//do reconnect
-	if c.typ == REMOTE {
-		go b.connectRouter(c.route.remoteID, c.route.remoteUrl)
 	}
 
 }
 
-func (c *client) WriterPacket(packet packets.ControlPacket) error {
+var errTakeoverWrite = errors.New("write interrupted by client takeover")
+var errTakeoverWriteStarted = errors.New("interrupted write may have sent a partial packet")
+var errWriteNotStarted = errors.New("packet write not started")
+var errWriteZeroBytes = errors.New("packet write sent zero bytes")
+
+type countingPacketWriter struct {
+	conn    net.Conn
+	written int
+}
+
+func (w *countingPacketWriter) Write(p []byte) (int, error) {
+	n, err := w.conn.Write(p)
+	w.written += n
+	return n, err
+}
+
+func (c *client) WriterPacket(packet packets.ControlPacket) (result error) {
 	defer func() {
 		if err := recover(); err != nil {
 			log.Error("recover error, ", zap.Any("recover", err))
+			result = fmt.Errorf("write packet panic: %v", err)
 		}
 	}()
-	if c.status == Disconnected {
-		return nil
-	}
-
 	if packet == nil {
 		return nil
 	}
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.conn == nil {
-		return errors.New("connect lost ....")
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	if c.isDisconnected() {
+		return errors.Join(net.ErrClosed, errWriteNotStarted)
 	}
+	c.mu.Lock()
+	conn := c.conn
+	if c.takeoverWaiters != 0 {
+		c.mu.Unlock()
+		return errors.Join(errTakeoverWrite, errWriteNotStarted)
+	}
+	if conn == nil {
+		c.mu.Unlock()
+		return errors.Join(net.ErrClosed, errWriteNotStarted)
+	}
+	if err := conn.SetWriteDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		c.mu.Unlock()
+		return err
+	}
+	c.writing = true
+	c.writeInterrupted = false
+	c.mu.Unlock()
+	w := &countingPacketWriter{conn: conn}
+	defer func() {
+		c.mu.Lock()
+		if result != nil && c.writeInterrupted && errors.Is(result, os.ErrDeadlineExceeded) {
+			result = errors.Join(result, errTakeoverWrite, errTakeoverWriteStarted)
+			if w.written == 0 {
+				result = errors.Join(result, errWriteZeroBytes)
+			}
+		}
+		c.writing = false
+		_ = conn.SetWriteDeadline(time.Time{})
+		c.mu.Unlock()
+	}()
+	return packet.Write(w)
+}
 
-	return packet.Write(c.conn)
+// beginTakeover stops queued writes and wakes an active write before acquiring the route lock.
+func (c *client) beginTakeover() func() {
+	c.mu.Lock()
+	c.takeoverWaiters++
+	if c.conn != nil && c.writing {
+		if err := c.conn.SetWriteDeadline(time.Now()); err == nil {
+			c.writeInterrupted = true
+		}
+	}
+	c.mu.Unlock()
+	return func() {
+		c.mu.Lock()
+		c.takeoverWaiters--
+		c.mu.Unlock()
+	}
 }
 
 func (c *client) registerPublishPacketId(packetId uint16) error {
-	if c.isAwaitingFull() {
-		log.Error("Dropped qos2 packet for too many awaiting_rel", zap.Uint16("id", packetId))
-		return errors.New("DROPPED_QOS2_PACKET_FOR_TOO_MANY_AWAITING_REL")
+	if c.session != nil {
+		switch c.session.RegisterAwaitingRel(packetId, time.Now().Unix(), c.maxAwaitingRel) {
+		case 1:
+			return errors.New("RC_PACKET_IDENTIFIER_IN_USE")
+		case 2:
+			return errors.New("DROPPED_QOS2_PACKET_FOR_TOO_MANY_AWAITING_REL")
+		default:
+			return nil
+		}
 	}
-
 	c.awaitingRelMu.Lock()
 	defer c.awaitingRelMu.Unlock()
 	if _, found := c.awaitingRel[packetId]; found {
 		return errors.New("RC_PACKET_IDENTIFIER_IN_USE")
 	}
+	if c.maxAwaitingRel > 0 && len(c.awaitingRel) >= c.maxAwaitingRel {
+		log.Error("Dropped qos2 packet for too many awaiting_rel", zap.Uint16("id", packetId))
+		return errors.New("DROPPED_QOS2_PACKET_FOR_TOO_MANY_AWAITING_REL")
+	}
+
 	c.awaitingRel[packetId] = time.Now().Unix()
-	time.AfterFunc(time.Duration(awaitRelTimeout)*time.Second, c.expireAwaitingRel)
 	return nil
 }
 
 func (c *client) isAwaitingFull() bool {
+	if c.session != nil {
+		return c.maxAwaitingRel > 0 && c.session.AwaitingRelCount() >= c.maxAwaitingRel
+	}
 	c.awaitingRelMu.RLock()
 	defer c.awaitingRelMu.RUnlock()
 	if c.maxAwaitingRel == 0 {
@@ -946,6 +1046,10 @@ func (c *client) isAwaitingFull() bool {
 }
 
 func (c *client) expireAwaitingRel() {
+	// Session state must survive until PUBREL or session deletion.
+	if c.session != nil {
+		return
+	}
 	c.awaitingRelMu.Lock()
 	defer c.awaitingRelMu.Unlock()
 	if len(c.awaitingRel) == 0 {
@@ -961,6 +1065,12 @@ func (c *client) expireAwaitingRel() {
 }
 
 func (c *client) pubRel(packetId uint16) error {
+	if c.session != nil {
+		if c.session.RemoveAwaitingRel(packetId) {
+			return nil
+		}
+		return errors.New("RC_PACKET_IDENTIFIER_NOT_FOUND")
+	}
 	c.awaitingRelMu.Lock()
 	defer c.awaitingRelMu.Unlock()
 	if _, found := c.awaitingRel[packetId]; found {

@@ -3,9 +3,11 @@
 
 name: Go
 
+permissions:
+  contents: read
+
 on:
   push:
-    branches: [ "master" ]
   pull_request:
     branches: [ "master" ]
 
@@ -14,15 +16,27 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
 
     - name: Set up Go
-      uses: actions/setup-go@v3
+      uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
       with:
-        go-version: "1.26.6"
+        go-version-file: go.mod
 
     - name: Build
       run: go build -v ./...
 
     - name: Test
-      run: go test -v ./...
+      run: go test -race -count=1 -timeout 180s ./...
+
+    - name: Vulnerability scan
+      run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+  container:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
+    - name: Build container
+      run: docker build --pull --tag hmq-release-check .
+    - name: Smoke test container
+      run: docker run --rm --network none hmq-release-check --help

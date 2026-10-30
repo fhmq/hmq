@@ -3,7 +3,9 @@ package topics
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/eclipse/paho.mqtt.golang/packets"
 )
@@ -49,6 +51,9 @@ func ValidQos(qos byte) bool {
 }
 
 func (this *memTopics) Subscribe(topic []byte, qos byte, sub interface{}) (byte, error) {
+	if err := validateTopic(topic, true); err != nil {
+		return QosFailure, err
+	}
 	if !ValidQos(qos) {
 		return QosFailure, fmt.Errorf("Invalid QoS %d", qos)
 	}
@@ -72,6 +77,9 @@ func (this *memTopics) Subscribe(topic []byte, qos byte, sub interface{}) (byte,
 }
 
 func (this *memTopics) Unsubscribe(topic []byte, sub interface{}) error {
+	if err := validateTopic(topic, true); err != nil {
+		return err
+	}
 	this.smu.Lock()
 	defer this.smu.Unlock()
 
@@ -80,6 +88,9 @@ func (this *memTopics) Unsubscribe(topic []byte, sub interface{}) error {
 
 // Subscribers Returned values will be invalidated by the next Subscribers call
 func (this *memTopics) Subscribers(topic []byte, qos byte, subs *[]interface{}, qoss *[]byte) error {
+	if err := validateTopic(topic, false); err != nil {
+		return err
+	}
 	if !ValidQos(qos) {
 		return fmt.Errorf("Invalid QoS %d", qos)
 	}
@@ -90,10 +101,23 @@ func (this *memTopics) Subscribers(topic []byte, qos byte, subs *[]interface{}, 
 	*subs = (*subs)[0:0]
 	*qoss = (*qoss)[0:0]
 
+	if topic[0] == '$' {
+		level, rem, _ := nextTopicLevel(topic)
+		if n := this.sroot.snodes[string(level)]; n != nil {
+			return n.smatch(rem, qos, subs, qoss)
+		}
+		return nil
+	}
 	return this.sroot.smatch(topic, qos, subs, qoss)
 }
 
 func (this *memTopics) Retain(msg *packets.PublishPacket) error {
+	if msg == nil {
+		return fmt.Errorf("message cannot be nil")
+	}
+	if err := validateTopic([]byte(msg.TopicName), false); err != nil {
+		return err
+	}
 	this.rmu.Lock()
 	defer this.rmu.Unlock()
 
@@ -104,19 +128,60 @@ func (this *memTopics) Retain(msg *packets.PublishPacket) error {
 		return this.rroot.rremove([]byte(msg.TopicName))
 	}
 
-	return this.rroot.rinsertOrUpdate([]byte(msg.TopicName), msg)
+	return this.rroot.rinsertOrUpdate([]byte(msg.TopicName), clonePublish(msg))
+}
+
+func clonePublish(msg *packets.PublishPacket) *packets.PublishPacket {
+	copyMsg := *msg
+	copyMsg.Payload = append([]byte(nil), msg.Payload...)
+	return &copyMsg
 }
 
 func (this *memTopics) Retained(topic []byte, msgs *[]*packets.PublishPacket) error {
+	if err := validateTopic(topic, true); err != nil {
+		return err
+	}
 	this.rmu.RLock()
 	defer this.rmu.RUnlock()
 
+	level, rem, _ := nextTopicLevel(topic)
+	if string(level) == MWC || string(level) == SWC {
+		for key, n := range this.rroot.rnodes {
+			if strings.HasPrefix(key, "$") {
+				continue
+			}
+			if string(level) == MWC {
+				n.allRetained(msgs)
+			} else if err := n.rmatch(rem, msgs); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	return this.rroot.rmatch(topic, msgs)
 }
 
+func validateTopic(topic []byte, filter bool) error {
+	if len(topic) == 0 || len(topic) > 65535 || !utf8.Valid(topic) || strings.IndexByte(string(topic), 0) >= 0 {
+		return fmt.Errorf("invalid topic")
+	}
+	for i, level := range strings.Split(string(topic), "/") {
+		if strings.ContainsAny(level, "+#") {
+			if !filter || (level != "+" && level != "#") || (level == "#" && i != strings.Count(string(topic), "/")) {
+				return fmt.Errorf("invalid topic wildcard")
+			}
+		}
+	}
+	return nil
+}
+
 func (this *memTopics) Close() error {
-	this.sroot = nil
-	this.rroot = nil
+	this.smu.Lock()
+	this.rmu.Lock()
+	this.sroot = newSNode()
+	this.rroot = newRNode()
+	this.rmu.Unlock()
+	this.smu.Unlock()
 	return nil
 }
 
@@ -140,7 +205,7 @@ func (this *snode) sinsert(topic []byte, qos byte, sub interface{}) error {
 	// If there's no more topic levels, that means we are at the matching snode
 	// to insert the subscriber. So let's see if there's such subscriber,
 	// if so, update it. Otherwise insert it.
-	if len(topic) == 0 {
+	if topic == nil {
 		// Let's see if the subscriber is already on the list. If yes, update
 		// QoS and then return.
 		for i := range this.subs {
@@ -183,7 +248,7 @@ func (this *snode) sinsert(topic []byte, qos byte, sub interface{}) error {
 func (this *snode) sremove(topic []byte, sub interface{}) error {
 	// If the topic is empty, it means we are at the final matching snode. If so,
 	// let's find the matching subscribers and remove them.
-	if len(topic) == 0 {
+	if topic == nil {
 		// If subscriber == nil, then it's signal to remove ALL subscribers
 		if sub == nil {
 			this.subs = this.subs[0:0]
@@ -242,7 +307,7 @@ func (this *snode) sremove(topic []byte, sub interface{}) error {
 func (this *snode) smatch(topic []byte, qos byte, subs *[]interface{}, qoss *[]byte) error {
 	// If the topic is empty, it means we are at the final matching snode. If so,
 	// let's find the subscribers that match the qos and append them to the list.
-	if len(topic) == 0 {
+	if topic == nil {
 		this.matchQos(qos, subs, qoss)
 		if mwcn, _ := this.snodes[MWC]; mwcn != nil {
 			mwcn.matchQos(qos, subs, qoss)
@@ -288,7 +353,7 @@ func newRNode() *rnode {
 
 func (this *rnode) rinsertOrUpdate(topic []byte, msg *packets.PublishPacket) error {
 	// If there's no more topic levels, that means we are at the matching rnode.
-	if len(topic) == 0 {
+	if topic == nil {
 		// Reuse the message if possible
 		this.msg = msg
 
@@ -320,7 +385,7 @@ func (this *rnode) rinsertOrUpdate(topic []byte, msg *packets.PublishPacket) err
 func (this *rnode) rremove(topic []byte) error {
 	// If the topic is empty, it means we are at the final matching rnode. If so,
 	// let's remove the buffer and message.
-	if len(topic) == 0 {
+	if topic == nil {
 		this.msg = nil
 		return nil
 	}
@@ -339,7 +404,7 @@ func (this *rnode) rremove(topic []byte) error {
 	// Find the rnode that matches the topic level
 	n, ok := this.rnodes[level]
 	if !ok {
-		return fmt.Errorf("No topic found")
+		return nil
 	}
 
 	// Remove the subscriber from the next level rnode
@@ -348,7 +413,7 @@ func (this *rnode) rremove(topic []byte) error {
 	}
 
 	// If there are no more rnodes to the next level we just visited let's remove it
-	if len(n.rnodes) == 0 {
+	if len(n.rnodes) == 0 && n.msg == nil {
 		delete(this.rnodes, level)
 	}
 
@@ -361,9 +426,9 @@ func (this *rnode) rremove(topic []byte) error {
 func (this *rnode) rmatch(topic []byte, msgs *[]*packets.PublishPacket) error {
 	// If the topic is empty, it means we are at the final matching rnode. If so,
 	// add the retained msg to the list.
-	if len(topic) == 0 {
+	if topic == nil {
 		if this.msg != nil {
-			*msgs = append(*msgs, this.msg)
+			*msgs = append(*msgs, clonePublish(this.msg))
 		}
 		return nil
 	}
@@ -400,7 +465,7 @@ func (this *rnode) rmatch(topic []byte, msgs *[]*packets.PublishPacket) error {
 
 func (this *rnode) allRetained(msgs *[]*packets.PublishPacket) {
 	if this.msg != nil {
-		*msgs = append(*msgs, this.msg)
+		*msgs = append(*msgs, clonePublish(this.msg))
 	}
 
 	for _, n := range this.rnodes {
@@ -425,10 +490,6 @@ func nextTopicLevel(topic []byte) ([]byte, []byte, error) {
 		case '/':
 			if s == stateMWC {
 				return nil, nil, fmt.Errorf("Multi-level wildcard found in topic and it's not at the last level")
-			}
-
-			if i == 0 {
-				return []byte(SWC), topic[i+1:], nil
 			}
 
 			return topic[:i], topic[i+1:], nil
@@ -479,12 +540,16 @@ func nextTopicLevel(topic []byte) ([]byte, []byte, error) {
 // if the client is granted only QoS 0, and the publish message is QoS 1, then this
 // client is not to be send the published message.
 func (this *snode) matchQos(qos byte, subs *[]interface{}, qoss *[]byte) {
-	for _, sub := range this.subs {
+	for i, sub := range this.subs {
 		// If the published QoS is higher than the subscriber QoS, then we skip the
 		// subscriber. Otherwise, add to the list.
 		// if qos >= this.qos[i] {
 		*subs = append(*subs, sub)
-		*qoss = append(*qoss, qos)
+		matchedQos := qos
+		if this.qos[i] < matchedQos {
+			matchedQos = this.qos[i]
+		}
+		*qoss = append(*qoss, matchedQos)
 		// }
 	}
 }
@@ -498,7 +563,10 @@ func equal(k1, k2 interface{}) bool {
 		return &k1 == &k2
 	}
 
-	if k1 == k2 {
+	if reflect.TypeOf(k1) == nil {
+		return true
+	}
+	if reflect.TypeOf(k1).Comparable() && k1 == k2 {
 		return true
 	}
 

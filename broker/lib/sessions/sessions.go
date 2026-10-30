@@ -6,13 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 )
 
 var (
 	ErrSessionsProviderNotFound = errors.New("Session: Session provider not found")
 	ErrKeyNotAvailable          = errors.New("Session: not item found for key.")
 
-	providers = make(map[string]SessionsProvider)
+	providers   = make(map[string]func() SessionsProvider)
+	providersMu sync.RWMutex
 )
 
 type SessionsProvider interface {
@@ -32,14 +34,22 @@ func Register(name string, provider SessionsProvider) {
 		panic("session: Register provide is nil")
 	}
 
+	registerFactory(name, func() SessionsProvider { return provider })
+}
+
+func registerFactory(name string, factory func() SessionsProvider) {
+	providersMu.Lock()
+	defer providersMu.Unlock()
 	if _, dup := providers[name]; dup {
 		panic("session: Register called twice for provider " + name)
 	}
 
-	providers[name] = provider
+	providers[name] = factory
 }
 
 func Unregister(name string) {
+	providersMu.Lock()
+	defer providersMu.Unlock()
 	delete(providers, name)
 }
 
@@ -48,12 +58,14 @@ type Manager struct {
 }
 
 func NewManager(providerName string) (*Manager, error) {
-	p, ok := providers[providerName]
+	providersMu.RLock()
+	factory, ok := providers[providerName]
+	providersMu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("session: unknown provider %q", providerName)
 	}
 
-	return &Manager{p: p}, nil
+	return &Manager{p: factory()}, nil
 }
 
 func (this *Manager) New(id string) (*Session, error) {

@@ -1,8 +1,8 @@
 package auth
 
 import (
-	authfile "github.com/fhmq/hmq/plugins/auth/authfile"
-	"github.com/fhmq/hmq/plugins/auth/authhttp"
+	authfile "github.com/fhmq/hmq/v3/plugins/auth/authfile"
+	"github.com/fhmq/hmq/v3/plugins/auth/authhttp"
 )
 
 const (

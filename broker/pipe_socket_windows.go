@@ -23,7 +23,14 @@ func (b *Broker) StartPipeSocketListening(pipeName string, usePipe bool) {
 			break // successfully listening
 		}
 		log.Error("Error listening on ", zap.Error(err))
-		time.Sleep(1 * time.Second)
+		select {
+		case <-time.After(time.Second):
+		case <-b.stopped:
+			return
+		}
+	}
+	if !b.registerListener(ln) {
+		return
 	}
 
 	tmpDelay := 10 * ACCEPT_MIN_SLEEP
@@ -31,6 +38,11 @@ func (b *Broker) StartPipeSocketListening(pipeName string, usePipe bool) {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
+			select {
+			case <-b.stopped:
+				return
+			default:
+			}
 			if ne, ok := err.(net.Error); ok && ne.Temporary() {
 				log.Error(
 					"Temporary Client Accept Error(%v), sleeping %dms",
@@ -50,12 +62,14 @@ func (b *Broker) StartPipeSocketListening(pipeName string, usePipe bool) {
 		}
 
 		tmpDelay = ACCEPT_MIN_SLEEP
-		go func() {
+		if !b.launch(func() {
 			err := b.handleConnection(CLIENT, conn)
 			fmt.Println("handleConnection,", err)
 			if err != nil {
 				conn.Close()
 			}
-		}()
+		}) {
+			conn.Close()
+		}
 	}
 }

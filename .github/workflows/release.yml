@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Validate release notes
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[A-Za-z0-9][A-Za-z0-9._-]*$ ]]
+          notes="docs/releases/$RELEASE_TAG.md"
+          if [[ ! -f "$notes" ]] || ! grep -q '[^[:space:]]' "$notes"; then
+            printf 'Missing or empty release notes: %s\n' "$notes" >&2
+            exit 1
+          fi
+
+      - name: Set up Go from go.mod
+        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Validate release
+        run: |
+          go test -race -count=1 -timeout 180s ./...
+          go vet ./...
+          go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+          docker build --pull --tag hmq-release-check .
+          docker run --rm --network none hmq-release-check --help
+
+      - name: Build release archives
+        run: bash scripts/build-release.sh "$RELEASE_TAG" "$RUNNER_TEMP/release-assets"
+
+      - name: Create or update this release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          GH_PROMPT_DISABLED: '1'
+        run: |
+          set -euo pipefail
+          notes="docs/releases/$RELEASE_TAG.md"
+          assets="$RUNNER_TEMP/release-assets"
+          (cd "$assets" && sha256sum -c SHA256SUMS)
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --notes-file "$notes"
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --title "$RELEASE_TAG" \
+              --notes-file "$notes" --draft
+          fi
+          gh release upload "$RELEASE_TAG" "$assets"/* --clobber
+          gh release edit "$RELEASE_TAG" --draft=false

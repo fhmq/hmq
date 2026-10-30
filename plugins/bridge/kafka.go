@@ -3,9 +3,12 @@ package bridge
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"strings"
+	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/IBM/sarama"
 	"go.uber.org/zap"
@@ -24,42 +27,63 @@ type kafkaConfig struct {
 type kafka struct {
 	kafkaConfig kafkaConfig
 	kafkaClient sarama.AsyncProducer
+	mu          sync.RWMutex
+	closeOnce   sync.Once
+	done        chan struct{}
+	errorsDone  chan struct{}
+	closeErr    error
 }
 
 // InitKafka Init kafka client
-func InitKafka() *kafka {
+func InitKafka() (*kafka, error) {
 	log.Info("start connect kafka....")
 	content, err := ioutil.ReadFile("./plugins/kafka/kafka.json")
 	if err != nil {
-		log.Fatal("Read config file error: ", zap.Error(err))
+		return nil, fmt.Errorf("read kafka config: %w", err)
 	}
 	// log.Info(string(content))
 	var config kafkaConfig
 	err = json.Unmarshal(content, &config)
 	if err != nil {
-		log.Fatal("Unmarshal config file error: ", zap.Error(err))
+		return nil, fmt.Errorf("parse kafka config: %w", err)
 	}
 	c := &kafka{kafkaConfig: config}
-	c.connect()
-	return c
+	if err := c.connect(); err != nil {
+		return nil, err
+	}
+	return c, nil
 }
 
 // connect
-func (k *kafka) connect() {
+func (k *kafka) connect() error {
 	conf := sarama.NewConfig()
 	conf.Version = sarama.V1_1_1_0
 	kafkaClient, err := sarama.NewAsyncProducer(k.kafkaConfig.Addr, conf)
 	if err != nil {
-		log.Fatal("create kafka async producer failed: ", zap.Error(err))
+		return fmt.Errorf("create kafka async producer: %w", err)
 	}
-
+	k.kafkaClient = kafkaClient
+	k.done = make(chan struct{})
+	k.errorsDone = make(chan struct{})
 	go func() {
+		defer close(k.errorsDone)
 		for err := range kafkaClient.Errors() {
 			log.Error("send msg to kafka failed: ", zap.Error(err))
 		}
 	}()
 
-	k.kafkaClient = kafkaClient
+	return nil
+}
+
+func (k *kafka) Close() error {
+	k.closeOnce.Do(func() {
+		close(k.done)
+		k.mu.Lock()
+		defer k.mu.Unlock()
+		k.kafkaClient.AsyncClose()
+		<-k.errorsDone
+	})
+	return k.closeErr
 }
 
 // Publish publish to kafka
@@ -104,6 +128,13 @@ func (k *kafka) Publish(e *Elements) (bool, error) {
 }
 
 func (k *kafka) publish(topics map[string]bool, key string, msg *Elements) error {
+	k.mu.RLock()
+	defer k.mu.RUnlock()
+	select {
+	case <-k.done:
+		return errors.New("kafka producer closed")
+	default:
+	}
 	payload, err := json.Marshal(msg)
 	if err != nil {
 		return err
@@ -111,6 +142,8 @@ func (k *kafka) publish(topics map[string]bool, key string, msg *Elements) error
 
 	for topic, _ := range topics {
 		select {
+		case <-k.done:
+			return errors.New("kafka producer closed")
 		case k.kafkaClient.Input() <- &sarama.ProducerMessage{
 			Topic: topic,
 			Key:   sarama.ByteEncoder(key),
@@ -152,5 +185,22 @@ func match(subTopic []string, topic []string) bool {
 }
 
 func matchTopic(subTopic string, topic string) bool {
-	return match(strings.Split(subTopic, "/"), strings.Split(topic, "/"))
+	if subTopic == "" || topic == "" || len(subTopic) > 65535 || len(topic) > 65535 ||
+		!utf8.ValidString(subTopic) || !utf8.ValidString(topic) ||
+		strings.ContainsAny(topic, "#+\x00") || strings.ContainsRune(subTopic, '\x00') {
+		return false
+	}
+	levels := strings.Split(subTopic, "/")
+	for i, level := range levels {
+		if strings.Contains(level, "#") && (level != "#" || i != len(levels)-1) {
+			return false
+		}
+		if strings.Contains(level, "+") && level != "+" {
+			return false
+		}
+	}
+	if strings.HasPrefix(topic, "$") && (levels[0] == "+" || levels[0] == "#") {
+		return false
+	}
+	return match(levels, strings.Split(topic, "/"))
 }

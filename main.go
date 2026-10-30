@@ -5,14 +5,17 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/fhmq/hmq/broker"
-	"github.com/fhmq/hmq/logger"
+	"github.com/fhmq/hmq/v3/broker"
+	"github.com/fhmq/hmq/v3/logger"
 	"go.uber.org/zap"
 )
 
 var log = logger.Get()
 
 func main() {
+	if printVersion(os.Args[1:], os.Stdout) {
+		return
+	}
 	config, err := broker.ConfigureConfig(os.Args[1:])
 	if err != nil {
 		log.Fatal("configure broker config error", zap.Error(err))
@@ -25,6 +28,7 @@ func main() {
 	b.Start()
 
 	s := waitForSignal()
+	b.Close()
 	log.Info("signal received, broker closed.", zap.Any("signal", s))
 }
 

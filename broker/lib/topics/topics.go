@@ -2,6 +2,7 @@ package topics
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/eclipse/paho.mqtt.golang/packets"
 )
@@ -24,7 +25,8 @@ const (
 )
 
 var (
-	providers = make(map[string]TopicsProvider)
+	providers   = make(map[string]TopicsProvider)
+	providersMu sync.RWMutex
 )
 
 // TopicsProvider
@@ -42,6 +44,8 @@ func Register(name string, provider TopicsProvider) {
 		panic("topics: Register provide is nil")
 	}
 
+	providersMu.Lock()
+	defer providersMu.Unlock()
 	if _, dup := providers[name]; dup {
 		panic("topics: Register called twice for provider " + name)
 	}
@@ -50,6 +54,8 @@ func Register(name string, provider TopicsProvider) {
 }
 
 func Unregister(name string) {
+	providersMu.Lock()
+	defer providersMu.Unlock()
 	delete(providers, name)
 }
 
@@ -58,9 +64,14 @@ type Manager struct {
 }
 
 func NewManager(providerName string) (*Manager, error) {
+	providersMu.RLock()
+	defer providersMu.RUnlock()
 	p, ok := providers[providerName]
 	if !ok {
 		return nil, fmt.Errorf("session: unknown provider %q", providerName)
+	}
+	if _, ok := p.(*memTopics); ok {
+		p = NewMemProvider()
 	}
 
 	return &Manager{p: p}, nil

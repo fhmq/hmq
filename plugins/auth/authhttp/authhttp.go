@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fhmq/hmq/logger"
+	"github.com/fhmq/hmq/v3/logger"
 	"go.uber.org/zap"
 )
 
-//Config device kafka config
+// Config device kafka config
 type Config struct {
 	AuthURL  string `json:"auth"`
 	ACLURL   string `json:"acl"`
@@ -23,15 +23,14 @@ type Config struct {
 
 type authHTTP struct {
 	client *http.Client
+	config Config
 }
 
 var (
-	config     Config
-	log        = logger.Get().Named("authhttp")
-	httpClient *http.Client
+	log = logger.Get().Named("authhttp")
 )
 
-//Init init kafak client
+// Init init kafak client
 func Init() *authHTTP {
 	content, err := ioutil.ReadFile("./plugins/auth/authhttp/http.json")
 	if err != nil {
@@ -39,13 +38,14 @@ func Init() *authHTTP {
 	}
 	// log.Info(string(content))
 
+	var config Config
 	err = json.Unmarshal(content, &config)
 	if err != nil {
 		log.Fatal("Unmarshal config file error: ", zap.Error(err))
 	}
 	// fmt.Println("http: config: ", config)
 
-	httpClient = &http.Client{
+	client := &http.Client{
 		Transport: &http.Transport{
 			MaxConnsPerHost:     100,
 			MaxIdleConns:        100,
@@ -53,27 +53,18 @@ func Init() *authHTTP {
 		},
 		Timeout: time.Second * 100,
 	}
-	return &authHTTP{client: httpClient}
+	return &authHTTP{client: client, config: config}
 }
 
 // CheckConnect check mqtt connect
 func (a *authHTTP) CheckConnect(clientID, username, password string) bool {
-	action := "connect"
-	{
-		aCache := checkCache(action, clientID, username, password, "")
-		if aCache != nil {
-			if aCache.password == password && aCache.username == username && aCache.action == action {
-				return true
-			}
-		}
-	}
 
 	data := url.Values{}
 	data.Add("username", username)
 	data.Add("clientid", clientID)
 	data.Add("password", password)
 
-	req, err := http.NewRequest("POST", config.AuthURL, strings.NewReader(data.Encode()))
+	req, err := http.NewRequest("POST", a.config.AuthURL, strings.NewReader(data.Encode()))
 	if err != nil {
 		log.Error("new request super: ", zap.Error(err))
 		return false
@@ -90,7 +81,6 @@ func (a *authHTTP) CheckConnect(clientID, username, password string) bool {
 	defer resp.Body.Close()
 	io.Copy(ioutil.Discard, resp.Body)
 	if resp.StatusCode == http.StatusOK {
-		addCache(action, clientID, username, password, "")
 		return true
 	}
 
@@ -137,19 +127,10 @@ func (a *authHTTP) CheckConnect(clientID, username, password string) bool {
 // 	return false
 // }
 
-//CheckACL check mqtt connect
+// CheckACL check mqtt connect
 func (a *authHTTP) CheckACL(action, clientID, username, ip, topic string) bool {
 
-	{
-		aCache := checkCache(action, "", username, "", topic)
-		if aCache != nil {
-			if aCache.topic == topic && aCache.action == action {
-				return true
-			}
-		}
-	}
-
-	req, err := http.NewRequest("GET", config.ACLURL, nil)
+	req, err := http.NewRequest("GET", a.config.ACLURL, nil)
 	if err != nil {
 		log.Error("get acl: ", zap.Error(err))
 		return false
@@ -172,7 +153,6 @@ func (a *authHTTP) CheckACL(action, clientID, username, ip, topic string) bool {
 	io.Copy(ioutil.Discard, resp.Body)
 
 	if resp.StatusCode == http.StatusOK {
-		addCache(action, "", username, "", topic)
 		return true
 	}
 	return false

@@ -46,20 +46,23 @@ func AclConfigLoad(file string) (*ACLConfig, error) {
 
 func (c *ACLConfig) Parse() error {
 	f, err := os.Open(c.File)
-	defer f.Close()
 	if err != nil {
 		return err
 	}
+	defer f.Close()
 	buf := bufio.NewReader(f)
 	var parseErr error
 	for {
 		line, err := buf.ReadString('\n')
 		line = strings.TrimSpace(line)
-		if isCommentOut(line) {
+		if isCommentOut(line) || line == "" {
+			if err != nil {
+				if err != io.EOF {
+					return err
+				}
+				return parseErr
+			}
 			continue
-		}
-		if line == "" {
-			return parseErr
 		}
 		// fmt.Println(line)
 		tmpArr := strings.Fields(line)
