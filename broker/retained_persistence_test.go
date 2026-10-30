@@ -193,11 +193,17 @@ func TestRetainedStorageFailureNoMQTTAck(t *testing.T) {
 			} else if _, ok := p.(*packets.ConnackPacket); !ok {
 				t.Fatalf("unexpected %T", p)
 			}
-			v, ok := b.clients.Load("failure-test")
-			if !ok {
+			var registered *client
+			for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); {
+				if v, ok := b.clients.Load("failure-test"); ok {
+					registered = v.(*client)
+					break
+				}
+				time.Sleep(time.Millisecond)
+			}
+			if registered == nil {
 				t.Fatal("client not registered")
 			}
-			client := v.(*client)
 			pub := packets.NewControlPacket(packets.Publish).(*packets.PublishPacket)
 			pub.TopicName, pub.Qos, pub.MessageID, pub.Retain, pub.Payload = "failure/topic", qos, 1, true, make([]byte, storage.MaxRecordSize)
 			if err := pub.Write(conn); err != nil {
@@ -209,11 +215,11 @@ func TestRetainedStorageFailureNoMQTTAck(t *testing.T) {
 				t.Fatalf("connection not closed: %v", err)
 			}
 			if qos == 2 {
-				client.publishMu.Lock()
-				client.awaitingRelMu.RLock()
-				_, exists := client.awaitingRel[pub.MessageID]
-				client.awaitingRelMu.RUnlock()
-				client.publishMu.Unlock()
+				registered.publishMu.Lock()
+				registered.awaitingRelMu.RLock()
+				_, exists := registered.awaitingRel[pub.MessageID]
+				registered.awaitingRelMu.RUnlock()
+				registered.publishMu.Unlock()
 				if exists {
 					t.Fatal("failed publish remains registered as awaiting PUBREL")
 				}
