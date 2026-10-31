@@ -6,7 +6,7 @@ import (
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
-	"github.com/eclipse/paho.mqtt.golang/packets"
+	"github.com/fhmq/hmq/v4/broker/packets"
 )
 
 func TestMQTTQoS2DuplicatePublishAndPubrel(t *testing.T) {

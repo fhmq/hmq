@@ -10,7 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/fhmq/hmq/v3/broker/eventstore"
+	"github.com/fhmq/hmq/v4/broker/eventstore"
 )
 
 var ErrClosed = errors.New("reliable: closed")

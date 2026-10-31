@@ -5,7 +5,7 @@ import (
 	"net"
 	"testing"
 
-	"github.com/eclipse/paho.mqtt.golang/packets"
+	"github.com/fhmq/hmq/v4/broker/packets"
 )
 
 func TestPublishDeliveryErrors(t *testing.T) {

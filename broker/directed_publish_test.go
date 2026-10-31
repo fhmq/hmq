@@ -4,7 +4,7 @@ import (
 	"net"
 	"testing"
 
-	"github.com/eclipse/paho.mqtt.golang/packets"
+	"github.com/fhmq/hmq/v4/broker/packets"
 )
 
 func TestDirectedPublishKeepsClientRegistered(t *testing.T) {

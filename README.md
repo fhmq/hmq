@@ -3,14 +3,18 @@ Free and High Performance MQTT Broker
 ============
 
 ## About
-Golang MQTT Broker, Version 3.1.1, and Compatible
+Golang MQTT Broker with MQTT 3.1.1 and an MQTT 5.0 profile
 for [eclipse paho client](https://github.com/eclipse?utf8=%E2%9C%93&q=mqtt&type=&language=) and mosquitto-client
+
+MQTT 3.x and 5 clients share the existing TCP, TLS and WebSocket listeners.
+See [MQTT 5 support and negotiated limits](broker/MQTT5.md) before deployment.
 
 ## RUNNING
 Use Go 1.27.3 or newer to build from source:
 
-The v3 Go module path is `github.com/fhmq/hmq/v3`; previous unversioned imports
-must be updated. Release binaries do not require a Go installation.
+The v4 Go module path is `github.com/fhmq/hmq/v4`; previous imports must be
+updated. Embedders should use `broker/packets` for publications and callbacks.
+Release binaries do not require a Go installation.
 
 ```bash
 git clone https://github.com/fhmq/hmq.git

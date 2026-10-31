@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eclipse/paho.mqtt.golang/packets"
-	"github.com/fhmq/hmq/v3/broker/lib/sessions"
+	"github.com/fhmq/hmq/v4/broker/packets"
+	"github.com/fhmq/hmq/v4/broker/lib/sessions"
 )
 
 type blockedConnackConn struct {

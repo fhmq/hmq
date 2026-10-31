@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fhmq/hmq/v3/broker/eventstore"
-	"github.com/fhmq/hmq/v3/broker/reliable/inbox"
+	"github.com/fhmq/hmq/v4/broker/eventstore"
+	"github.com/fhmq/hmq/v4/broker/reliable/inbox"
 )
 
 func TestReliableSIGKILLAndLostACK(t *testing.T) {

@@ -7,9 +7,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/fhmq/hmq/v3/broker/eventstore"
-	"github.com/fhmq/hmq/v3/broker/reliable"
-	"github.com/fhmq/hmq/v3/broker/storage"
+	"github.com/fhmq/hmq/v4/broker/eventstore"
+	"github.com/fhmq/hmq/v4/broker/reliable"
+	"github.com/fhmq/hmq/v4/broker/storage"
 )
 
 func TestCapacityRetainsCompletedIdentity(t *testing.T) {

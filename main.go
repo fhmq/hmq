@@ -5,8 +5,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/fhmq/hmq/v3/broker"
-	"github.com/fhmq/hmq/v3/logger"
+	"github.com/fhmq/hmq/v4/broker"
+	"github.com/fhmq/hmq/v4/logger"
 	"go.uber.org/zap"
 )
 

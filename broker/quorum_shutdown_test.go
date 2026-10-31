@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fhmq/hmq/v3/broker/replication"
+	"github.com/fhmq/hmq/v4/broker/replication"
 	"github.com/hashicorp/raft"
 )
 

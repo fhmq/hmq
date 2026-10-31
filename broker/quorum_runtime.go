@@ -16,9 +16,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/eclipse/paho.mqtt.golang/packets"
-	"github.com/fhmq/hmq/v3/broker/replication"
-	"github.com/fhmq/hmq/v3/broker/storage"
+	"github.com/fhmq/hmq/v4/broker/packets"
+	"github.com/fhmq/hmq/v4/broker/replication"
+	"github.com/fhmq/hmq/v4/broker/storage"
 	"github.com/hashicorp/raft"
 )
 
@@ -280,7 +280,7 @@ func (r *quorumRuntime) publish(p *packets.PublishPacket) error {
 		return err
 	}
 	defer r.releaseProposal()
-	data, err := stdjson.Marshal(clusterPublish{p.TopicName, p.Payload, p.Qos, false})
+	data, err := stdjson.Marshal(clusterPublication(p))
 	if err != nil {
 		return err
 	}
@@ -361,6 +361,7 @@ func (r *quorumRuntime) startConsumer(id, clusterID string, deliver func(*packet
 				}
 				p := packets.NewControlPacket(packets.Publish).(*packets.PublishPacket)
 				p.TopicName, p.Payload, p.Qos, p.Retain = msg.Topic, msg.Payload, msg.QoS, msg.Retain
+				p.Metadata = packets.CloneMetadata(msg.Metadata)
 				if !validQuorumPublication(p) {
 					err = ErrQuorumRoutingUnavailable
 					break

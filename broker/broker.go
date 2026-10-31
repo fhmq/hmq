@@ -15,16 +15,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fhmq/hmq/v3/broker/cluster"
-	"github.com/fhmq/hmq/v3/broker/lib/sessions"
-	"github.com/fhmq/hmq/v3/broker/lib/topics"
-	"github.com/fhmq/hmq/v3/broker/reliable/inbox"
-	"github.com/fhmq/hmq/v3/broker/sessionstore"
-	"github.com/fhmq/hmq/v3/plugins/auth"
-	"github.com/fhmq/hmq/v3/plugins/bridge"
-	"github.com/fhmq/hmq/v3/pool"
+	mqtt5 "github.com/eclipse/paho.golang/packets"
+	"github.com/fhmq/hmq/v4/broker/cluster"
+	"github.com/fhmq/hmq/v4/broker/lib/sessions"
+	"github.com/fhmq/hmq/v4/broker/lib/topics"
+	"github.com/fhmq/hmq/v4/broker/reliable/inbox"
+	"github.com/fhmq/hmq/v4/broker/sessionstore"
+	"github.com/fhmq/hmq/v4/plugins/auth"
+	"github.com/fhmq/hmq/v4/plugins/bridge"
+	"github.com/fhmq/hmq/v4/pool"
 
-	"github.com/eclipse/paho.mqtt.golang/packets"
+	"github.com/fhmq/hmq/v4/broker/packets"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/net/websocket"
@@ -38,6 +39,7 @@ const (
 type Message struct {
 	client *client
 	packet packets.ControlPacket
+	mqtt5  *mqtt5.ControlPacket
 }
 
 type Broker struct {
@@ -136,7 +138,7 @@ func (b *Broker) forwardMessage(packet *packets.PublishPacket) error {
 		return forward(packet)
 	}
 	if b.reliableRuntime != nil {
-		data, err := encJson.Marshal(clusterPublish{packet.TopicName, packet.Payload, packet.Qos, packet.Retain})
+		data, err := encJson.Marshal(clusterPublication(packet))
 		if err != nil {
 			return err
 		}
@@ -736,28 +738,30 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) error {
 	}
 	defer b.unregisterConnection(conn)
 	// process connect packet
-	packet, err := packets.ReadPacket(conn)
+	msg, state, err := readClientConnect(conn)
 	if err != nil {
+		if state != nil {
+			_ = b.writeMQTT5Connack(conn, state, mqtt5Reason(err))
+		}
 		return fmt.Errorf("read connect packet error: %w", err)
 	}
-	if packet == nil {
+	if msg == nil {
 		return errors.New("received nil packet")
-	}
-	msg, ok := packet.(*packets.ConnectPacket)
-	if !ok {
-		return errors.New("received msg that was not Connect")
 	}
 
 	log.Info("read connect from ", getAdditionalLogFields(msg.ClientIdentifier, conn)...)
 
 	connack := packets.NewControlPacket(packets.Connack).(*packets.ConnackPacket)
 	connack.ReturnCode = msg.Validate()
+	if state != nil {
+		connack.ReturnCode = packets.Accepted
+	}
 	if b.quorumEnabled() && (msg.WillFlag || !msg.CleanSession || typ != CLIENT) {
 		connack.ReturnCode = packets.ErrRefusedNotAuthorised
 	}
 
 	if connack.ReturnCode != packets.Accepted {
-		if err := connack.Write(conn); err != nil {
+		if err := b.writeConnack(conn, state, connack); err != nil {
 			return fmt.Errorf("send connack error: %w, clientID: %v, conn: %v", err, msg.ClientIdentifier, conn)
 		}
 		return fmt.Errorf("connect packet validate failed with connack.ReturnCode %v", connack.ReturnCode)
@@ -765,7 +769,7 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) error {
 
 	if typ == CLIENT && !b.CheckConnectAuth(msg.ClientIdentifier, msg.Username, string(msg.Password)) {
 		connack.ReturnCode = packets.ErrRefusedNotAuthorised
-		if err := connack.Write(conn); err != nil {
+		if err := b.writeConnack(conn, state, connack); err != nil {
 			return fmt.Errorf("send connack error: %w, clientID: %v, conn: %v", err, msg.ClientIdentifier, conn)
 		}
 		return fmt.Errorf("connect packet CheckConnectAuth failed with connack.ReturnCode %v", connack.ReturnCode)
@@ -778,6 +782,10 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) error {
 		willmsg.Retain = msg.WillRetain
 		willmsg.Payload = msg.WillMessage
 		willmsg.Dup = msg.Dup
+		if state != nil {
+			willmsg.Metadata = publicationMetadata(state.connect.WillProperties, msg.ClientIdentifier)
+			willmsg.Metadata.ExpiresAt = time.Time{}
+		}
 	} else {
 		willmsg = nil
 	}
@@ -793,11 +801,12 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) error {
 		broker: b,
 		conn:   conn,
 		info:   info,
+		mqtt5:  state,
 	}
 
 	c.init()
 	var endTakeover func()
-	if typ == CLIENT {
+	if typ == CLIENT && (state == nil || state.connect.CleanStart) {
 		if old, ok := b.clients.Load(msg.ClientIdentifier); ok {
 			if previous, ok := old.(*client); ok {
 				endTakeover = previous.beginTakeover()
@@ -821,6 +830,22 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) error {
 		}
 	}()
 
+	if state != nil && !state.connect.CleanStart {
+		_, active := b.clients.Load(msg.ClientIdentifier)
+		_, savedErr := b.sessionMgr.Get(msg.ClientIdentifier)
+		existing := active || savedErr == nil
+		if b.sessionLog != nil {
+			_, found, _, _, inspectErr := b.sessionLog.Inspect(msg.ClientIdentifier, 0)
+			if inspectErr != nil {
+				return inspectErr
+			}
+			existing = existing || found
+		}
+		if existing {
+			_ = b.writeMQTT5Connack(conn, state, 0x83)
+			return errors.New("MQTT 5 profile cannot resume existing session without Clean Start")
+		}
+	}
 	if !msg.CleanSession {
 		_, err = b.sessionMgr.Get(msg.ClientIdentifier)
 		connack.SessionPresent = err == nil
@@ -849,7 +874,7 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) error {
 	if err := conn.SetWriteDeadline(time.Now().Add(2 * time.Second)); err != nil {
 		return fmt.Errorf("set connack write deadline: %w", err)
 	}
-	err = connack.Write(conn)
+	err = b.writeConnack(conn, state, connack)
 	_ = conn.SetWriteDeadline(time.Time{})
 	if err != nil {
 		return fmt.Errorf("send connack error: %w, clientID: %v, conn: %v", err, msg.ClientIdentifier, conn)
@@ -995,17 +1020,22 @@ func (b *Broker) PublishMessage(packet *packets.PublishPacket) error {
 }
 
 type clusterPublish struct {
-	Topic   string
-	Payload []byte
-	QoS     byte
-	Retain  bool
+	Topic    string
+	Payload  []byte
+	QoS      byte
+	Retain   bool
+	Metadata *packets.PublishMetadata `json:",omitempty"`
+}
+
+func clusterPublication(p *packets.PublishPacket) clusterPublish {
+	return clusterPublish{Topic: p.TopicName, Payload: p.Payload, QoS: p.Qos, Retain: p.Retain, Metadata: packets.CloneMetadata(p.Metadata)}
 }
 
 func (b *Broker) broadcastClusterMessage(packet *packets.PublishPacket) {
 	if b.clusterNode == nil {
 		return
 	}
-	data, err := encJson.Marshal(clusterPublish{packet.TopicName, packet.Payload, packet.Qos, packet.Retain})
+	data, err := encJson.Marshal(clusterPublication(packet))
 	if err != nil {
 		log.Error("encode cluster publish", zap.Error(err))
 		return
@@ -1046,6 +1076,7 @@ func (b *Broker) deliverClusterMessage(data []byte) error {
 	}
 	p := packets.NewControlPacket(packets.Publish).(*packets.PublishPacket)
 	p.TopicName, p.Payload, p.Qos, p.Retain = msg.Topic, msg.Payload, msg.QoS, msg.Retain
+	p.Metadata = packets.CloneMetadata(msg.Metadata)
 	if p.Retain {
 		if err := b.topicsMgr.Retain(p); err != nil {
 			log.Error("retain cluster publish", zap.Error(err))
@@ -1065,6 +1096,9 @@ func (b *Broker) publishLocal(packet *packets.PublishPacket) error {
 }
 
 func (b *Broker) publishCommittedLocal(packet *packets.PublishPacket) error {
+	if packet.Metadata != nil && !packet.Metadata.ExpiresAt.IsZero() && !time.Now().Before(packet.Metadata.ExpiresAt) {
+		return nil
+	}
 	if err := b.routeDurable(packet); err != nil {
 		return err
 	}
@@ -1181,6 +1215,11 @@ func (b *Broker) PublishMessageByClientId(packet *packets.PublishPacket, clientI
 	conn, success := cli.(*client)
 	if !success {
 		return fmt.Errorf("clientId %s loaded fail", clientId)
+	}
+	if conn.mqtt5 != nil {
+		copy := packet.Copy()
+		copy.Qos, copy.Retain = packet.Qos, packet.Retain
+		return conn.sendPublication(copy, false, false)
 	}
 	return conn.WriterPacket(packet)
 }

@@ -13,7 +13,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	"github.com/fhmq/hmq/v3/broker/storage"
+	"github.com/fhmq/hmq/v4/broker/storage"
 )
 
 var ErrFull = errors.New("outbox: capacity exceeded")

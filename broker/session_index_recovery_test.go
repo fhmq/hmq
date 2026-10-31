@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/fhmq/hmq/v3/broker/sessionstore"
+	"github.com/fhmq/hmq/v4/broker/sessionstore"
 )
 
 func TestSessionIndexRecoveryPagesSubscriptions(t *testing.T) {

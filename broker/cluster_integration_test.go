@@ -20,7 +20,7 @@ import (
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
-	"github.com/eclipse/paho.mqtt.golang/packets"
+	"github.com/fhmq/hmq/v4/broker/packets"
 )
 
 type mqttFaultLink struct {

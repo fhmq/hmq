@@ -9,15 +9,17 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	"github.com/fhmq/hmq/v3/broker/storage"
+	"github.com/fhmq/hmq/v4/broker/packets"
+	"github.com/fhmq/hmq/v4/broker/storage"
 )
 
 var ErrInvalid = errors.New("retained: invalid record")
 
 type Message struct {
-	Topic   string `json:"topic"`
-	QoS     byte   `json:"qos"`
-	Payload []byte `json:"payload"`
+	Topic    string                   `json:"topic"`
+	QoS      byte                     `json:"qos"`
+	Payload  []byte                   `json:"payload"`
+	Metadata *packets.PublishMetadata `json:"metadata,omitempty"`
 }
 
 type record struct {
@@ -62,12 +64,13 @@ func Open(path string) (*Store, error) {
 	return s, nil
 }
 
-// Put persists a message before publishing it to readers. Payload is copied.
+// Put persists a message before publishing it to readers. Payload and metadata are copied.
 func (s *Store) Put(m Message) error {
 	if !valid(m) || len(m.Payload) == 0 {
 		return ErrInvalid
 	}
 	m.Payload = append([]byte(nil), m.Payload...)
+	m.Metadata = packets.CloneMetadata(m.Metadata)
 	return s.apply(record{Version: 1, Message: m})
 }
 
@@ -104,6 +107,7 @@ func (s *Store) Get(topic string) (Message, bool) {
 	defer s.mu.Unlock()
 	m, ok := s.messages[topic]
 	m.Payload = append([]byte(nil), m.Payload...)
+	m.Metadata = packets.CloneMetadata(m.Metadata)
 	return m, ok
 }
 
@@ -114,6 +118,7 @@ func (s *Store) All() []Message {
 	result := make([]Message, 0, len(s.messages))
 	for _, m := range s.messages {
 		m.Payload = append([]byte(nil), m.Payload...)
+		m.Metadata = packets.CloneMetadata(m.Metadata)
 		result = append(result, m)
 	}
 	return result

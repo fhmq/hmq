@@ -1,4 +1,4 @@
-module github.com/fhmq/hmq/v3
+module github.com/fhmq/hmq/v4
 
 go 1.27.3
 
@@ -6,6 +6,7 @@ require (
 	github.com/IBM/sarama v1.50.1
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/eapache/queue v1.1.0
+	github.com/eclipse/paho.golang v0.23.0
 	github.com/eclipse/paho.mqtt.golang v1.5.1
 	github.com/gin-gonic/gin v1.12.0
 	github.com/google/uuid v1.6.0

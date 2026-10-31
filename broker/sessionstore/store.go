@@ -12,7 +12,8 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	"github.com/fhmq/hmq/v3/broker/storage"
+	"github.com/fhmq/hmq/v4/broker/packets"
+	"github.com/fhmq/hmq/v4/broker/storage"
 )
 
 var ErrConflict = errors.New("sessionstore: version conflict")
@@ -21,10 +22,11 @@ var ErrCorrupt = errors.New("sessionstore: invalid log record")
 
 // Message is an unsent offline publication. It intentionally has no packet ID.
 type Message struct {
-	Retain  bool   `json:"retain,omitempty"`
-	Topic   string `json:"topic"`
-	Payload []byte `json:"payload"`
-	QoS     byte   `json:"qos"`
+	Retain   bool                     `json:"retain,omitempty"`
+	Topic    string                   `json:"topic"`
+	Payload  []byte                   `json:"payload"`
+	QoS      byte                     `json:"qos"`
+	Metadata *packets.PublishMetadata `json:"metadata,omitempty"`
 }
 
 // State is the complete state managed by this package, not a complete MQTT session.
@@ -244,6 +246,8 @@ func applyBatch(id string, state *State, b *Batch, legacy bool) (*State, error) 
 	for _, value := range startIDs {
 		packetID := uint16(value)
 		message := b.Start[packetID]
+		message.Payload = bytes.Clone(message.Payload)
+		message.Metadata = packets.CloneMetadata(message.Metadata)
 		if packetID == 0 || acked[packetID] || next.LastSequence == ^uint64(0) {
 			return nil, ErrInvalid
 		}
@@ -295,20 +299,42 @@ func clone(s *State) *State {
 		for i, m := range s.Queue {
 			c.Queue[i] = m
 			c.Queue[i].Payload = bytes.Clone(m.Payload)
+			c.Queue[i].Metadata = packets.CloneMetadata(m.Metadata)
 		}
 	}
 	if s.Inflight != nil {
 		c.Inflight = make(map[uint16]Inflight, len(s.Inflight))
 		for id, item := range s.Inflight {
 			item.Message.Payload = bytes.Clone(item.Message.Payload)
+			item.Message.Metadata = packets.CloneMetadata(item.Message.Metadata)
 			c.Inflight[id] = item
 		}
 	}
 	return c
 }
 
+// messageReadBytes preserves payload-only budgets for legacy messages while
+// charging MQTT5 metadata, including its properties, at its JSON-encoded size.
+func messageReadBytes(m Message, remaining int) (int, error) {
+	if len(m.Payload) > remaining {
+		return 0, storage.ErrTooLarge
+	}
+	size := len(m.Payload)
+	if m.Metadata != nil {
+		data, err := json.Marshal(m.Metadata)
+		if err != nil {
+			return 0, err
+		}
+		if len(data) > remaining-size {
+			return 0, storage.ErrTooLarge
+		}
+		size += len(data)
+	}
+	return size, nil
+}
+
 // ReadQueue returns at most limit messages starting at offset, with at most
-// maxBytes of payload. An oversized next message yields ErrTooLarge so callers
+// maxBytes of payload plus JSON-encoded metadata. An oversized first message yields ErrTooLarge so callers
 // can increase the bound. The version identifies the snapshot for CAS and
 // subsequent pages; restart pagination if the version changes.
 func (s *Store) ReadQueue(id string, offset, limit, maxBytes int) ([]Message, uint64, error) {
@@ -336,15 +362,20 @@ func (s *Store) ReadQueue(id string, offset, limit, maxBytes int) ([]Message, ui
 		if len(result) == limit {
 			break
 		}
-		if len(m.Payload) > maxBytes-used {
+		size, err := messageReadBytes(m, maxBytes-used)
+		if err != nil {
+			if !errors.Is(err, storage.ErrTooLarge) {
+				return nil, e.version, err
+			}
 			if len(result) == 0 {
 				return nil, e.version, storage.ErrTooLarge
 			}
 			break
 		}
 		m.Payload = bytes.Clone(m.Payload)
+		m.Metadata = packets.CloneMetadata(m.Metadata)
 		result = append(result, m)
-		used += len(m.Payload)
+		used += size
 	}
 	return result, e.version, nil
 }
@@ -355,6 +386,7 @@ type InflightEntry struct {
 }
 
 // ReadInflight returns entries in send order strictly after afterSequence.
+// maxBytes counts payload plus JSON-encoded metadata, as in ReadQueue.
 // As with ReadQueue, callers must compare versions across pages.
 func (s *Store) ReadInflight(id string, afterSequence uint64, limit, maxBytes int) ([]InflightEntry, uint64, error) {
 	s.mu.Lock()
@@ -386,14 +418,19 @@ func (s *Store) ReadInflight(id string, afterSequence uint64, limit, maxBytes in
 			break
 		}
 		item := entry.Inflight
-		if len(item.Message.Payload) > maxBytes-used {
+		size, err := messageReadBytes(item.Message, maxBytes-used)
+		if err != nil {
+			if !errors.Is(err, storage.ErrTooLarge) {
+				return nil, e.version, err
+			}
 			if len(result) == 0 {
 				return nil, e.version, storage.ErrTooLarge
 			}
 			break
 		}
 		item.Message.Payload = bytes.Clone(item.Message.Payload)
-		used += len(item.Message.Payload)
+		item.Message.Metadata = packets.CloneMetadata(item.Message.Metadata)
+		used += size
 		result = append(result, InflightEntry{PacketID: entry.PacketID, Inflight: item})
 	}
 	return result, e.version, nil
@@ -594,6 +631,7 @@ func (s *Store) Inspect(id string, packetID uint16) (uint64, bool, Inflight, boo
 	}
 	item, ok := e.state.Inflight[packetID]
 	item.Message.Payload = bytes.Clone(item.Message.Payload)
+	item.Message.Metadata = packets.CloneMetadata(item.Message.Metadata)
 	return e.version, true, item, ok, nil
 }
 

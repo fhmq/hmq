@@ -2,7 +2,7 @@ package broker
 
 import (
 	"errors"
-	"github.com/fhmq/hmq/v3/broker/cluster"
+	"github.com/fhmq/hmq/v4/broker/cluster"
 	"github.com/gin-gonic/gin"
 	"net"
 	"net/http"

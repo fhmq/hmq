@@ -5,8 +5,8 @@ import (
 	"errors"
 	"unicode/utf8"
 
-	"github.com/fhmq/hmq/v3/broker/eventstore"
-	"github.com/fhmq/hmq/v3/broker/reliable"
+	"github.com/fhmq/hmq/v4/broker/eventstore"
+	"github.com/fhmq/hmq/v4/broker/reliable"
 )
 
 // fanoutStore owns the only write path for new events. Link views may only

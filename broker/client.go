@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"reflect"
@@ -14,10 +15,11 @@ import (
 	"unicode/utf8"
 
 	"github.com/eapache/queue"
-	"github.com/eclipse/paho.mqtt.golang/packets"
-	"github.com/fhmq/hmq/v3/broker/lib/sessions"
-	"github.com/fhmq/hmq/v3/broker/lib/topics"
-	"github.com/fhmq/hmq/v3/plugins/bridge"
+	mqtt5 "github.com/eclipse/paho.golang/packets"
+	"github.com/fhmq/hmq/v4/broker/lib/sessions"
+	"github.com/fhmq/hmq/v4/broker/lib/topics"
+	"github.com/fhmq/hmq/v4/broker/packets"
+	"github.com/fhmq/hmq/v4/plugins/bridge"
 	"go.uber.org/zap"
 	"golang.org/x/net/websocket"
 )
@@ -63,6 +65,7 @@ type client struct {
 	cancelFunc       context.CancelFunc
 	session          *sessions.Session
 	transport        net.Conn
+	mqtt5            *mqtt5State
 	outboundOwner    uint64
 	durableEpoch     uint64
 	durableReady     bool     // Guarded by outboundSendMu; replay precedes queue pumping.
@@ -98,12 +101,15 @@ type inflightElem struct {
 	timestamp int64
 }
 type subscription struct {
-	client     *client
-	topic      string
-	qos        byte
-	share      bool
-	groupName  string
-	generation uint64
+	client            *client
+	topic             string
+	qos               byte
+	share             bool
+	groupName         string
+	generation        uint64
+	noLocal           bool
+	retainAsPublished bool
+	subscriptionID    int
 }
 
 type info struct {
@@ -181,8 +187,18 @@ func (c *client) readLoop() {
 				}
 			}
 
-			packet, err := packets.ReadPacket(nc)
+			packet, v5, err := c.readClientPacket(nc)
 			if err != nil {
+				if c.mqtt5 != nil && !errors.Is(err, io.EOF) {
+					var network net.Error
+					if errors.As(err, &network) {
+						if network.Timeout() {
+							c.mqtt5Disconnect(0x8d)
+						}
+					} else {
+						c.mqtt5Disconnect(mqtt5Reason(err))
+					}
+				}
 				log.Error("read packet error: ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 				msg := &Message{
 					client: c,
@@ -195,7 +211,9 @@ func (c *client) readLoop() {
 			// if packet is disconnect from client, then need to break the read packet loop and clear will msg.
 			if _, isDisconnect := packet.(*packets.DisconnectPacket); isDisconnect {
 				c.stateMu.Lock()
-				c.info.willMsg = nil
+				if v5 == nil || v5.Content.(*mqtt5.Disconnect).ReasonCode == 0 {
+					c.info.willMsg = nil
+				}
 				c.stateMu.Unlock()
 				c.cancelFunc()
 			} else {
@@ -207,6 +225,7 @@ func (c *client) readLoop() {
 			msg := &Message{
 				client: c,
 				packet: packet,
+				mqtt5:  v5,
 			}
 			b.SubmitWork(c.info.clientID, msg)
 		}
@@ -284,6 +303,9 @@ func ProcessMessage(msg *Message) {
 	if ca == nil {
 		return
 	}
+	if msg.mqtt5 != nil && c.processMQTT5NegativeAck(msg.mqtt5) {
+		return
+	}
 	if c.durable() {
 		switch ca.(type) {
 		case *packets.PubackPacket, *packets.PubrecPacket, *packets.PubcompPacket:
@@ -351,6 +373,7 @@ func ProcessMessage(msg *Message) {
 		}
 		c.inflightMu.Unlock()
 		c.outboundSendMu.Unlock()
+		c.pumpMQTT5Queue()
 		if c.durable() {
 			if err := c.pumpSessionQueue(); err != nil {
 				closeAfterRoute = true
@@ -386,6 +409,9 @@ func ProcessMessage(msg *Message) {
 		c.inflightMu.Unlock()
 		if !valid {
 			c.outboundSendMu.Unlock()
+			if c.mqtt5 != nil {
+				_ = c.WriterPacket(&mqtt5WirePacket{wire: &mqtt5.Pubrel{PacketID: packet.MessageID, ReasonCode: 0x92, Properties: &mqtt5.Properties{}}})
+			}
 			return
 		}
 
@@ -403,7 +429,11 @@ func ProcessMessage(msg *Message) {
 			return
 		}
 		packet := ca.(*packets.PubrelPacket)
-		_ = c.pubRel(packet.MessageID)
+		relErr := c.pubRel(packet.MessageID)
+		if c.mqtt5 != nil && relErr != nil {
+			_ = c.WriterPacket(&mqtt5WirePacket{wire: &mqtt5.Pubcomp{PacketID: packet.MessageID, ReasonCode: 0x92, Properties: &mqtt5.Properties{}}})
+			return
+		}
 		pubcomp := packets.NewControlPacket(packets.Pubcomp).(*packets.PubcompPacket)
 		pubcomp.MessageID = packet.MessageID
 		if err := c.WriterPacket(pubcomp); err != nil {
@@ -428,6 +458,7 @@ func ProcessMessage(msg *Message) {
 		}
 		c.inflightMu.Unlock()
 		c.outboundSendMu.Unlock()
+		c.pumpMQTT5Queue()
 		if c.durable() {
 			if err := c.pumpSessionQueue(); err != nil {
 				closeAfterRoute = true
@@ -435,7 +466,11 @@ func ProcessMessage(msg *Message) {
 		}
 	case *packets.SubscribePacket:
 		packet := ca.(*packets.SubscribePacket)
-		c.ProcessSubscribe(packet)
+		if msg.mqtt5 != nil {
+			c.processClientSubscribeOptions(packet, msg.mqtt5.Content.(*mqtt5.Subscribe))
+		} else {
+			c.ProcessSubscribe(packet)
+		}
 	case *packets.SubackPacket:
 	case *packets.UnsubscribePacket:
 		packet := ca.(*packets.UnsubscribePacket)
@@ -471,6 +506,13 @@ func (c *client) processClientPublish(packet *packets.PublishPacket) {
 
 	if !c.broker.CheckTopicAuth(PUB, c.info.clientID, c.info.username, c.info.remoteIP, topic) {
 		log.Error("Pub Topics Auth failed, ", zap.String("topic", topic), zap.String("ClientID", c.info.clientID))
+		if c.mqtt5 != nil {
+			if packet.Qos == 1 {
+				_ = c.WriterPacket(&mqtt5WirePacket{wire: &mqtt5.Puback{PacketID: packet.MessageID, ReasonCode: 0x87, Properties: &mqtt5.Properties{}}})
+			} else if packet.Qos == 2 {
+				_ = c.WriterPacket(&mqtt5WirePacket{wire: &mqtt5.Pubrec{PacketID: packet.MessageID, ReasonCode: 0x87, Properties: &mqtt5.Properties{}}})
+			}
+		}
 		return
 	}
 	registered := false
@@ -591,6 +633,10 @@ func (c *client) ProcessSubscribe(packet *packets.SubscribePacket) {
 }
 
 func (c *client) processClientSubscribe(packet *packets.SubscribePacket) {
+	c.processClientSubscribeOptions(packet, nil)
+}
+
+func (c *client) processClientSubscribeOptions(packet *packets.SubscribePacket, options *mqtt5.Subscribe) {
 	if c.isDisconnected() {
 		return
 	}
@@ -659,6 +705,7 @@ func (c *client) processClientSubscribe(packet *packets.SubscribePacket) {
 			return
 		}
 		generation := sessions.NewSubscriptionGeneration()
+		_, existed := c.subMap[t]
 		if oldSub, exist := c.subMap[t]; exist {
 			generation = oldSub.generation
 			_ = c.topicsMgr.Unsubscribe([]byte(oldSub.topic), oldSub)
@@ -672,6 +719,14 @@ func (c *client) processClientSubscribe(packet *packets.SubscribePacket) {
 			share:      share,
 			groupName:  groupName,
 			generation: generation,
+		}
+		if options != nil {
+			o := options.Subscriptions[i]
+			sub.noLocal = o.NoLocal
+			sub.retainAsPublished = o.RetainAsPublished
+			if options.Properties.SubscriptionIdentifier != nil {
+				sub.subscriptionID = *options.Properties.SubscriptionIdentifier
+			}
 		}
 
 		rqos, err := c.topicsMgr.Subscribe([]byte(topic), qoss[i], sub)
@@ -688,6 +743,9 @@ func (c *client) processClientSubscribe(packet *packets.SubscribePacket) {
 		c.subMapMu.Unlock()
 		c.stateMu.Unlock()
 		retcodes = append(retcodes, rqos)
+		if options != nil && (sub.share || options.Subscriptions[i].RetainHandling == 2 || options.Subscriptions[i].RetainHandling == 1 && existed) {
+			continue
+		}
 		var matches []*packets.PublishPacket
 		if err := c.topicsMgr.Retained([]byte(topic), &matches); err != nil {
 			log.Error("read retained messages", zap.Error(err), zap.String("ClientID", c.info.clientID))
@@ -757,6 +815,7 @@ func (c *client) processClientUnSubscribe(packet *packets.UnsubscribePacket) {
 	}
 
 	unSubTopics := packet.Topics
+	reasons := make([]byte, 0, len(unSubTopics))
 
 	for _, topic := range unSubTopics {
 		{
@@ -780,6 +839,11 @@ func (c *client) processClientUnSubscribe(packet *packets.UnsubscribePacket) {
 		c.subMapMu.Lock()
 		sub, exist := c.subMap[topic]
 		if exist {
+			reasons = append(reasons, 0)
+		} else {
+			reasons = append(reasons, 0x11)
+		}
+		if exist {
 			if err := c.persistFilter(topic, nil); err != nil {
 				c.subMapMu.Unlock()
 				c.stateMu.Unlock()
@@ -798,7 +862,12 @@ func (c *client) processClientUnSubscribe(packet *packets.UnsubscribePacket) {
 	unsuback := packets.NewControlPacket(packets.Unsuback).(*packets.UnsubackPacket)
 	unsuback.MessageID = packet.MessageID
 
-	err := c.WriterPacket(unsuback)
+	var err error
+	if c.mqtt5 != nil {
+		err = c.WriterPacket(&mqtt5WirePacket{wire: &mqtt5.Unsuback{PacketID: packet.MessageID, Reasons: reasons, Properties: &mqtt5.Properties{}}})
+	} else {
+		err = c.WriterPacket(unsuback)
+	}
 	if err != nil {
 		log.Error("send unsuback error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 		return
@@ -917,6 +986,9 @@ func (c *client) close() func() {
 		}
 
 		if willMsg != nil {
+			if willMsg.Metadata != nil && willMsg.Metadata.Properties != nil && willMsg.Metadata.Properties.MessageExpiry != nil {
+				willMsg.Metadata.ExpiresAt = time.Now().Add(time.Duration(*willMsg.Metadata.Properties.MessageExpiry) * time.Second)
+			}
 			b.PublishMessage(willMsg)
 		}
 	}
@@ -985,7 +1057,7 @@ func (c *client) WriterPacket(packet packets.ControlPacket) (result error) {
 		_ = conn.SetWriteDeadline(time.Time{})
 		c.mu.Unlock()
 	}()
-	return packet.Write(w)
+	return c.writeClientPacket(w, packet)
 }
 
 // beginTakeover stops queued writes and wakes an active write before acquiring the route lock.

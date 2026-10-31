@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/eclipse/paho.mqtt.golang/packets"
-	"github.com/fhmq/hmq/v3/broker/lib/topics/retained"
-	"github.com/fhmq/hmq/v3/broker/storage"
+	"github.com/fhmq/hmq/v4/broker/lib/topics/retained"
+	"github.com/fhmq/hmq/v4/broker/packets"
+	"github.com/fhmq/hmq/v4/broker/storage"
 )
 
 // NewPersistentManager creates an independent manager with durable retained
@@ -20,6 +20,7 @@ func NewPersistentManager(path string) (*Manager, error) {
 	for _, m := range store.All() {
 		msg := packets.NewControlPacket(packets.Publish).(*packets.PublishPacket)
 		msg.TopicName, msg.Qos, msg.Payload = m.Topic, m.QoS, m.Payload
+		msg.Metadata = packets.CloneMetadata(m.Metadata)
 		if err := p.memTopics.Retain(msg); err != nil {
 			store.Close()
 			return nil, err
@@ -49,6 +50,7 @@ func (p *persistentTopics) Retain(msg *packets.PublishPacket) error {
 	canonical := packets.NewControlPacket(packets.Publish).(*packets.PublishPacket)
 	canonical.TopicName, canonical.Qos = msg.TopicName, msg.Qos
 	canonical.Payload = append([]byte(nil), msg.Payload...)
+	canonical.Metadata = packets.CloneMetadata(msg.Metadata)
 	msg = canonical
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -62,7 +64,7 @@ func (p *persistentTopics) Retain(msg *packets.PublishPacket) error {
 	if len(msg.Payload) == 0 {
 		err = p.store.Delete(msg.TopicName)
 	} else {
-		err = p.store.Put(retained.Message{Topic: msg.TopicName, QoS: msg.Qos, Payload: msg.Payload})
+		err = p.store.Put(retained.Message{Topic: msg.TopicName, QoS: msg.Qos, Payload: msg.Payload, Metadata: msg.Metadata})
 	}
 	if err != nil {
 		p.err = err

@@ -2,10 +2,10 @@ package broker
 
 import (
 	"errors"
-	"github.com/eclipse/paho.mqtt.golang/packets"
-	"github.com/fhmq/hmq/v3/broker/lib/sessions"
-	"github.com/fhmq/hmq/v3/broker/lib/topics"
-	"github.com/fhmq/hmq/v3/broker/sessionstore"
+	"github.com/fhmq/hmq/v4/broker/lib/sessions"
+	"github.com/fhmq/hmq/v4/broker/lib/topics"
+	"github.com/fhmq/hmq/v4/broker/packets"
+	"github.com/fhmq/hmq/v4/broker/sessionstore"
 	"net"
 	"strings"
 	"sync"
@@ -160,7 +160,7 @@ func (c *client) persistOutbound(id uint16, msg *sessions.OutboundMessage) error
 		}
 		batch.Acks = []sessionstore.Ack{{PacketID: id, Type: "PUBREC"}}
 	} else {
-		batch.Start = map[uint16]sessionstore.Message{id: {Topic: msg.Packet.TopicName, Payload: msg.Packet.Payload, QoS: msg.Packet.Qos}}
+		batch.Start = map[uint16]sessionstore.Message{id: {Topic: msg.Packet.TopicName, Payload: msg.Packet.Payload, QoS: msg.Packet.Qos, Retain: msg.Packet.Retain, Metadata: packets.CloneMetadata(msg.Packet.Metadata)}}
 	}
 	_, err = c.broker.sessionLog.Apply(c.info.clientID, v, batch)
 	return err
@@ -232,7 +232,7 @@ func (b *Broker) routeDurable(packet *packets.PublishPacket) error {
 			if qos == 0 {
 				return nil
 			}
-			return b.applySession(id, sessionstore.Batch{Enqueue: []sessionstore.Message{{Topic: packet.TopicName, Payload: packet.Payload, QoS: qos}}})
+			return b.applySession(id, sessionstore.Batch{Enqueue: []sessionstore.Message{{Topic: packet.TopicName, Payload: packet.Payload, QoS: qos, Metadata: packets.CloneMetadata(packet.Metadata)}}})
 		}()
 		unlock()
 		if err != nil {
@@ -297,6 +297,7 @@ func (c *client) loadSessionLog() error {
 			p := packets.NewControlPacket(packets.Publish).(*packets.PublishPacket)
 			p.TopicName, p.Payload, p.Qos, p.MessageID = item.Message.Topic, item.Message.Payload, item.Message.QoS, id
 			p.Retain = item.Message.Retain
+			p.Metadata = packets.CloneMetadata(item.Message.Metadata)
 			c.session.SetOutbound(id, sessions.OutboundMessage{Packet: p, AwaitingPubcomp: item.Phase == sessionstore.PubRel})
 			c.durableReplayIDs = append(c.durableReplayIDs, id)
 			afterSequence = item.Sequence
@@ -362,7 +363,17 @@ func (c *client) prepareSessionLog(clean bool) (func() error, error) {
 		used[id] = true
 	}
 	remaining := b.durableWindow() - len(s.Inflight)
-	for n := 0; n < len(s.Queue) && n < remaining; n++ {
+	for _, message := range s.Queue {
+		if metadata := message.Metadata; metadata != nil && !metadata.ExpiresAt.IsZero() && !time.Now().Before(metadata.ExpiresAt) {
+			v, err = b.sessionLog.Apply(c.info.clientID, v, sessionstore.Batch{Remove: 1, ExpectedEpoch: &c.durableEpoch})
+			if err != nil {
+				return rollback, err
+			}
+			continue
+		}
+		if remaining <= 0 {
+			break
+		}
 		var id uint16
 		for n := 1; n <= 65535; n++ {
 			if !used[uint16(n)] {
@@ -374,6 +385,7 @@ func (c *client) prepareSessionLog(clean bool) (func() error, error) {
 			break
 		}
 		used[id] = true
+		remaining--
 		v, err = b.sessionLog.Apply(c.info.clientID, v, sessionstore.Batch{Move: []uint16{id}, ExpectedEpoch: &c.durableEpoch})
 		if err != nil {
 			return rollback, err
@@ -401,7 +413,7 @@ func (c *client) enqueueSessionDelivery(packet *packets.PublishPacket) error {
 	c.outboundSendMu.Lock()
 	defer c.outboundSendMu.Unlock()
 	epoch := c.durableEpoch
-	err := c.broker.applySession(c.info.clientID, sessionstore.Batch{ExpectedEpoch: &epoch, Enqueue: []sessionstore.Message{{Topic: packet.TopicName, Payload: packet.Payload, QoS: packet.Qos, Retain: packet.Retain}}})
+	err := c.broker.applySession(c.info.clientID, sessionstore.Batch{ExpectedEpoch: &epoch, Enqueue: []sessionstore.Message{{Topic: packet.TopicName, Payload: packet.Payload, QoS: packet.Qos, Retain: packet.Retain, Metadata: packets.CloneMetadata(packet.Metadata)}}})
 	if err != nil {
 		return err
 	}
@@ -428,6 +440,23 @@ func (c *client) pumpSessionQueueLocked() error {
 			return nil
 		}
 		c.inflightMu.Lock()
+		messages, version, err := c.broker.sessionLog.ReadQueue(c.info.clientID, 0, 1, int(^uint(0)>>1))
+		if err != nil || len(messages) == 0 {
+			c.inflightMu.Unlock()
+			c.stateMu.Unlock()
+			return err
+		}
+		message := messages[0]
+		// Expiry applies only before the delivery enters the QoS exchange.
+		if metadata := message.Metadata; metadata != nil && !metadata.ExpiresAt.IsZero() && !time.Now().Before(metadata.ExpiresAt) {
+			_, err = c.broker.sessionLog.Apply(c.info.clientID, version, sessionstore.Batch{ExpectedEpoch: &c.durableEpoch, Remove: 1})
+			c.inflightMu.Unlock()
+			c.stateMu.Unlock()
+			if err != nil {
+				return err
+			}
+			continue
+		}
 		if len(c.inflight) >= c.broker.durableWindow() {
 			c.inflightMu.Unlock()
 			c.stateMu.Unlock()
@@ -445,21 +474,15 @@ func (c *client) pumpSessionQueueLocked() error {
 			c.stateMu.Unlock()
 			return nil
 		}
-		messages, version, err := c.broker.sessionLog.ReadQueue(c.info.clientID, 0, 1, int(^uint(0)>>1))
-		if err != nil || len(messages) == 0 {
-			c.inflightMu.Unlock()
-			c.stateMu.Unlock()
-			return err
-		}
 		_, err = c.broker.sessionLog.Apply(c.info.clientID, version, sessionstore.Batch{ExpectedEpoch: &c.durableEpoch, Move: []uint16{id}})
 		if err != nil {
 			c.inflightMu.Unlock()
 			c.stateMu.Unlock()
 			return err
 		}
-		message := messages[0]
 		packet := packets.NewControlPacket(packets.Publish).(*packets.PublishPacket)
 		packet.TopicName, packet.Payload, packet.Qos, packet.MessageID, packet.Retain = message.Topic, message.Payload, message.QoS, id, message.Retain
+		packet.Metadata = packets.CloneMetadata(message.Metadata)
 		valid := c.session.UpdateOutbound(c.outboundOwner, id, &sessions.OutboundMessage{Packet: packet})
 		if valid {
 			c.inflight[id] = &inflightElem{status: Publish, packet: packet, timestamp: time.Now().Unix()}

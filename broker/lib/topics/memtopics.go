@@ -5,9 +5,10 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
-	"github.com/eclipse/paho.mqtt.golang/packets"
+	"github.com/fhmq/hmq/v4/broker/packets"
 )
 
 const (
@@ -134,6 +135,7 @@ func (this *memTopics) Retain(msg *packets.PublishPacket) error {
 func clonePublish(msg *packets.PublishPacket) *packets.PublishPacket {
 	copyMsg := *msg
 	copyMsg.Payload = append([]byte(nil), msg.Payload...)
+	copyMsg.Metadata = packets.CloneMetadata(msg.Metadata)
 	return &copyMsg
 }
 
@@ -144,6 +146,7 @@ func (this *memTopics) Retained(topic []byte, msgs *[]*packets.PublishPacket) er
 	this.rmu.RLock()
 	defer this.rmu.RUnlock()
 
+	var matches []*packets.PublishPacket
 	level, rem, _ := nextTopicLevel(topic)
 	if string(level) == MWC || string(level) == SWC {
 		for key, n := range this.rroot.rnodes {
@@ -151,14 +154,22 @@ func (this *memTopics) Retained(topic []byte, msgs *[]*packets.PublishPacket) er
 				continue
 			}
 			if string(level) == MWC {
-				n.allRetained(msgs)
-			} else if err := n.rmatch(rem, msgs); err != nil {
+				n.allRetained(&matches)
+			} else if err := n.rmatch(rem, &matches); err != nil {
 				return err
 			}
 		}
-		return nil
+	} else if err := this.rroot.rmatch(topic, &matches); err != nil {
+		return err
 	}
-	return this.rroot.rmatch(topic, msgs)
+	now := time.Now()
+	for _, msg := range matches {
+		if msg.Metadata != nil && !msg.Metadata.ExpiresAt.IsZero() && !now.Before(msg.Metadata.ExpiresAt) {
+			continue
+		}
+		*msgs = append(*msgs, msg)
+	}
+	return nil
 }
 
 func validateTopic(topic []byte, filter bool) error {

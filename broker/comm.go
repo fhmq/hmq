@@ -3,14 +3,16 @@ package broker
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"reflect"
 	"time"
 
+	mqtt5 "github.com/eclipse/paho.golang/packets"
 	jsoniter "github.com/json-iterator/go"
 
-	"github.com/eclipse/paho.mqtt.golang/packets"
-	"github.com/fhmq/hmq/v3/broker/lib/sessions"
+	"github.com/fhmq/hmq/v4/broker/lib/sessions"
+	"github.com/fhmq/hmq/v4/broker/packets"
 	uuid "github.com/google/uuid"
 )
 
@@ -136,79 +138,136 @@ func publishDelivery(sub *subscription, original *packets.PublishPacket, qos byt
 		}
 	}
 	packet := original.Copy()
+	if packet.Metadata != nil && !packet.Metadata.ExpiresAt.IsZero() && !time.Now().Before(packet.Metadata.ExpiresAt) {
+		return nil
+	}
+	if sub.noLocal && packet.Metadata != nil && packet.Metadata.Origin == sub.client.info.clientID {
+		return nil
+	}
 	packet.Qos = qos
 	packet.Dup = false
-	packet.Retain = retained
+	packet.Retain = retained || sub.retainAsPublished && original.Retain
 	packet.MessageID = 0
+	if sub.subscriptionID != 0 {
+		if packet.Metadata == nil {
+			packet.Metadata = &packets.PublishMetadata{}
+		}
+		if packet.Metadata.Properties == nil {
+			packet.Metadata.Properties = &mqtt5.Properties{}
+		}
+		id := sub.subscriptionID
+		packet.Metadata.Properties.SubscriptionIdentifier = &id
+	}
 	if sub.client.durable() && (qos == 1 || qos == 2) {
 		return sub.client.enqueueSessionDelivery(packet)
 	}
+	return sub.client.sendPublication(packet, sub.share, false)
+}
+
+func (c *client) sendPublication(packet *packets.PublishPacket, shared bool, fromQueue bool) error {
+	if packet.Metadata != nil && !packet.Metadata.ExpiresAt.IsZero() && !time.Now().Before(packet.Metadata.ExpiresAt) {
+		return nil
+	}
+	if c.mqtt5 != nil {
+		if err := c.writeClientPacket(io.Discard, packet); err != nil {
+			if errors.Is(err, errMQTT5MessageExpired) || mqtt5Reason(err) == 0x95 {
+				return nil
+			}
+			return err
+		}
+	}
 	switch packet.Qos {
 	case QosAtMostOnce:
-		return sub.client.WriterPacket(packet)
+		err := c.WriterPacket(packet)
+		if errors.Is(err, errMQTT5MessageExpired) {
+			return nil
+		}
+		return err
 	case QosAtLeastOnce, QosExactlyOnce:
-		sub.client.outboundSendMu.Lock()
-		defer sub.client.outboundSendMu.Unlock()
-		sub.client.stateMu.Lock()
-		if sub.client.status == Disconnected {
-			sub.client.stateMu.Unlock()
+		c.outboundSendMu.Lock()
+		defer c.outboundSendMu.Unlock()
+		c.stateMu.Lock()
+		if c.status == Disconnected {
+			c.stateMu.Unlock()
 			return errors.Join(net.ErrClosed, errWriteNotStarted)
 		}
-		sub.client.inflightMu.Lock()
+		c.inflightMu.Lock()
+		if c.mqtt5 != nil && (len(c.inflight) >= int(c.mqtt5.receiveMaximum) || !fromQueue && (len(c.mqtt5.queued) > 0 || c.mqtt5.draining)) {
+			c.inflightMu.Unlock()
+			c.stateMu.Unlock()
+			if len(c.mqtt5.queued) >= 256 || c.mqtt5.queuedBytes+publicationSize(packet) > 4<<20 {
+				return errors.New("MQTT 5 outbound queue full")
+			}
+			c.mqtt5.queued = append(c.mqtt5.queued, packet)
+			c.mqtt5.queuedBytes += publicationSize(packet)
+			return nil
+		}
 		for id := 1; id <= 65535; id++ {
-			if _, used := sub.client.inflight[uint16(id)]; !used {
+			if _, used := c.inflight[uint16(id)]; !used {
 				packet.MessageID = uint16(id)
 				break
 			}
 		}
 		if packet.MessageID == 0 {
-			sub.client.inflightMu.Unlock()
-			sub.client.stateMu.Unlock()
+			c.inflightMu.Unlock()
+			c.stateMu.Unlock()
 			return ErrPacketIDExhausted
 		}
-		sub.client.inflight[packet.MessageID] = &inflightElem{status: Publish, packet: packet, timestamp: time.Now().Unix()}
-		if sub.client.session != nil && !sub.client.session.UpdateOutbound(sub.client.outboundOwner, packet.MessageID, &sessions.OutboundMessage{Packet: packet}) {
-			delete(sub.client.inflight, packet.MessageID)
-			sub.client.inflightMu.Unlock()
-			sub.client.stateMu.Unlock()
+		c.inflight[packet.MessageID] = &inflightElem{status: Publish, packet: packet, timestamp: time.Now().Unix()}
+		if c.session != nil && !c.session.UpdateOutbound(c.outboundOwner, packet.MessageID, &sessions.OutboundMessage{Packet: packet}) {
+			delete(c.inflight, packet.MessageID)
+			c.inflightMu.Unlock()
+			c.stateMu.Unlock()
 			return errors.Join(net.ErrClosed, errWriteNotStarted)
 		}
-		sub.client.inflightMu.Unlock()
-		sub.client.stateMu.Unlock()
-		if err := sub.client.persistOutbound(packet.MessageID, &sessions.OutboundMessage{Packet: packet}); err != nil {
-			sub.client.inflightMu.Lock()
-			delete(sub.client.inflight, packet.MessageID)
-			if sub.client.session != nil {
-				sub.client.session.UpdateOutbound(sub.client.outboundOwner, packet.MessageID, nil)
+		c.inflightMu.Unlock()
+		c.stateMu.Unlock()
+		if err := c.persistOutbound(packet.MessageID, &sessions.OutboundMessage{Packet: packet}); err != nil {
+			c.inflightMu.Lock()
+			delete(c.inflight, packet.MessageID)
+			if c.session != nil {
+				c.session.UpdateOutbound(c.outboundOwner, packet.MessageID, nil)
 			}
-			sub.client.inflightMu.Unlock()
+			c.inflightMu.Unlock()
 			return err
 		}
-		if sub.client.durable() && sub.client.broker.durableRouteHook != nil {
-			sub.client.broker.durableRouteHook(sub.client.info.clientID, "persisted")
+		if c.durable() && c.broker.durableRouteHook != nil {
+			c.broker.durableRouteHook(c.info.clientID, "persisted")
 		}
-		err := sub.client.WriterPacket(packet)
-		if sub.share && (errors.Is(err, errWriteNotStarted) || errors.Is(err, errWriteZeroBytes)) {
-			sub.client.inflightMu.Lock()
-			delete(sub.client.inflight, packet.MessageID)
-			if sub.client.session != nil {
-				sub.client.session.UpdateOutbound(sub.client.outboundOwner, packet.MessageID, nil)
+		err := c.WriterPacket(packet)
+		if errors.Is(err, errMQTT5MessageExpired) {
+			c.inflightMu.Lock()
+			delete(c.inflight, packet.MessageID)
+			c.inflightMu.Unlock()
+			if c.session != nil {
+				c.session.UpdateOutbound(c.outboundOwner, packet.MessageID, nil)
 			}
-			sub.client.inflightMu.Unlock()
+			return nil
+		}
+		if shared && (errors.Is(err, errWriteNotStarted) || errors.Is(err, errWriteZeroBytes)) {
+			c.inflightMu.Lock()
+			delete(c.inflight, packet.MessageID)
+			if c.session != nil {
+				c.session.UpdateOutbound(c.outboundOwner, packet.MessageID, nil)
+			}
+			c.inflightMu.Unlock()
 			return err
 		}
-		sub.client.ensureRetryTimer()
-		if err != nil && sub.client.durable() {
+		c.ensureRetryTimer()
+		if err != nil && c.durable() {
 			return errors.Join(err, errDurableAccepted)
 		}
 		return err
 	default:
-		return fmt.Errorf("%w: %d", ErrInvalidDeliveryQoS, qos)
+		return fmt.Errorf("%w: %d", ErrInvalidDeliveryQoS, packet.Qos)
 	}
 }
 
 // timer for retry delivery
 func (c *client) ensureRetryTimer(interval ...int64) {
+	if c.mqtt5 != nil {
+		return
+	}
 
 	c.retryTimerLock.Lock()
 	defer c.retryTimerLock.Unlock()

@@ -14,9 +14,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/fhmq/hmq/v3/logger"
-	"github.com/fhmq/hmq/v3/plugins/auth"
-	"github.com/fhmq/hmq/v3/plugins/bridge"
+	"github.com/fhmq/hmq/v4/logger"
+	"github.com/fhmq/hmq/v4/plugins/auth"
+	"github.com/fhmq/hmq/v4/plugins/bridge"
 	jsoniter "github.com/json-iterator/go"
 )
 

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/fhmq/hmq/v3/broker/storage"
+	"github.com/fhmq/hmq/v4/broker/storage"
 )
 
 func TestInflightRecoveryAndAck(t *testing.T) {

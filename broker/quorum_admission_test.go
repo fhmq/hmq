@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eclipse/paho.mqtt.golang/packets"
-	"github.com/fhmq/hmq/v3/broker/replication"
-	"github.com/fhmq/hmq/v3/broker/storage"
+	"github.com/fhmq/hmq/v4/broker/packets"
+	"github.com/fhmq/hmq/v4/broker/replication"
+	"github.com/fhmq/hmq/v4/broker/storage"
 )
 
 func TestQuorumAdmissionConcurrentMQTTPublishers(t *testing.T) {

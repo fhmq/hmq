@@ -2,8 +2,8 @@ package broker
 
 import (
 	"fmt"
-	"github.com/eclipse/paho.mqtt.golang/packets"
-	"github.com/fhmq/hmq/v3/broker/sessionstore"
+	"github.com/fhmq/hmq/v4/broker/packets"
+	"github.com/fhmq/hmq/v4/broker/sessionstore"
 	"path/filepath"
 	"testing"
 )

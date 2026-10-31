@@ -10,7 +10,7 @@ import (
 	"io"
 	"sync"
 
-	"github.com/fhmq/hmq/v3/broker/storage"
+	"github.com/fhmq/hmq/v4/broker/storage"
 	"github.com/hashicorp/raft"
 )
 

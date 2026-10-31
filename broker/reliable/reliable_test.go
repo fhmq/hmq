@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fhmq/hmq/v3/broker/eventstore"
+	"github.com/fhmq/hmq/v4/broker/eventstore"
 )
 
 type testSender struct {

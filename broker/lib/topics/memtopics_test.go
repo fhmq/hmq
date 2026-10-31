@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/eclipse/paho.mqtt.golang/packets"
+	"github.com/fhmq/hmq/v4/broker/packets"
 )
 
 func TestRetainedIsolationAndParent(t *testing.T) {

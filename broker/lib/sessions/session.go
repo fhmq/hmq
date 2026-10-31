@@ -5,7 +5,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/eclipse/paho.mqtt.golang/packets"
+	"github.com/fhmq/hmq/v4/broker/packets"
 )
 
 var subscriptionGeneration atomic.Uint64
@@ -218,6 +218,7 @@ func clonePublish(msg *packets.PublishPacket) *packets.PublishPacket {
 	}
 	copy := *msg
 	copy.Payload = append([]byte(nil), msg.Payload...)
+	copy.Metadata = packets.CloneMetadata(msg.Metadata)
 	return &copy
 }
 

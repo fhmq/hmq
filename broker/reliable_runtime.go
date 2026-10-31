@@ -9,10 +9,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fhmq/hmq/v3/broker/cluster"
-	"github.com/fhmq/hmq/v3/broker/eventstore"
-	"github.com/fhmq/hmq/v3/broker/reliable"
-	"github.com/fhmq/hmq/v3/broker/reliable/inbox"
+	"github.com/fhmq/hmq/v4/broker/cluster"
+	"github.com/fhmq/hmq/v4/broker/eventstore"
+	"github.com/fhmq/hmq/v4/broker/reliable"
+	"github.com/fhmq/hmq/v4/broker/reliable/inbox"
 )
 
 // This protocol is experimental: receipt is local and processing is at least
