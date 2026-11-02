@@ -288,8 +288,6 @@ func (c *client) ensureRetryTimer(interval ...int64) {
 	}
 
 	c.retryTimer = time.AfterFunc(time.Duration(timerInterval)*time.Second, c.retryDelivery)
-
-	return
 }
 
 func (c *client) resetRetryTimer() {

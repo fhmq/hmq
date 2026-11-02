@@ -148,24 +148,15 @@ func (b *Broker) forwardMessage(packet *packets.PublishPacket) error {
 	return nil
 }
 
-func newMessagePool() []chan *Message {
-	pool := make([]chan *Message, 0)
-	for i := 0; i < MessagePoolNum; i++ {
-		ch := make(chan *Message, MessagePoolMessageNum)
-		pool = append(pool, ch)
-	}
-	return pool
-}
-
 func getAdditionalLogFields(clientIdentifier string, conn net.Conn, additionalFields ...zapcore.Field) []zapcore.Field {
 	var wsConn *websocket.Conn = nil
 	var wsEnabled bool
 	result := []zapcore.Field{}
 
-	switch conn.(type) {
+	switch conn := conn.(type) {
 	case *websocket.Conn:
 		wsEnabled = true
-		wsConn = conn.(*websocket.Conn)
+		wsConn = conn
 	case *net.TCPConn:
 		wsEnabled = false
 	}
@@ -342,9 +333,11 @@ func NewBroker(config *Config) (*Broker, error) {
 		if c.Reliable.Enabled {
 			reliableMembers = c.Reliable.MemberIDs
 		}
-		n, err := cluster.Start(cluster.Config{NodeID: c.NodeID, ClusterID: c.ClusterID, Secret: []byte(c.Secret), ListenAddr: c.Listen, Seeds: c.Seeds, ReliableMembers: reliableMembers,
+		n, err := cluster.Start(cluster.Config{
+			NodeID: c.NodeID, ClusterID: c.ClusterID, Secret: []byte(c.Secret), ListenAddr: c.Listen, Seeds: c.Seeds, ReliableMembers: reliableMembers,
 			ServerTLS: &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{cert}, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: roots},
-			ClientTLS: &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{cert}, RootCAs: roots}, OnMessage: func(peer string, data []byte) { <-gate; b.receiveClusterMessage(peer, data) }})
+			ClientTLS: &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{cert}, RootCAs: roots}, OnMessage: func(peer string, data []byte) { <-gate; b.receiveClusterMessage(peer, data) },
+		})
 		if err != nil {
 			close(gate)
 			b.Close()
@@ -542,7 +535,6 @@ func (b *Broker) Start() {
 	if b.config.TlsPort != "" {
 		b.launch(func() { b.StartClientListening(true) })
 	}
-
 }
 
 func (b *Broker) StartWebsocketListening() {
@@ -1247,7 +1239,7 @@ func (b *Broker) OnlineOfflineNotification(info Info, online bool, lastMsg int64
 
 	if b, err := encJson.Marshal(msg); err != nil {
 		// This is a TERRIBLE situation, falling back to legacy format to not break API Contract
-		packet.Payload = []byte(fmt.Sprintf(`{"clientID":"%s","online":%v,"timestamp":"%s"}`, info.ClientID, online, time.Now().UTC().Format(time.RFC3339)))
+		packet.Payload = fmt.Appendf(nil, `{"clientID":"%s","online":%v,"timestamp":"%s"}`, info.ClientID, online, time.Now().UTC().Format(time.RFC3339))
 	} else {
 		packet.Payload = b
 	}

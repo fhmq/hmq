@@ -43,9 +43,7 @@ const (
 	retryInterval   int64 = 20
 )
 
-var (
-	groupCompile = regexp.MustCompile(_GroupTopicRegexp)
-)
+var groupCompile = regexp.MustCompile(_GroupTopicRegexp)
 
 type client struct {
 	typ              int
@@ -132,13 +130,11 @@ type Info struct {
 	WillMsg   PubPacket `json:"willMsg"`
 }
 
-var (
-	DisconnectedPacket = packets.NewControlPacket(packets.Disconnect).(*packets.DisconnectPacket)
-)
+var DisconnectedPacket = packets.NewControlPacket(packets.Disconnect).(*packets.DisconnectPacket)
 
 func (c *client) init() {
 	c.transport = c.conn
-	c.lastMsgTime = time.Now().Unix() //mark the connection packet time as last time messaged
+	c.lastMsgTime = time.Now().Unix() // mark the connection packet time as last time messaged
 	c.status = Connected
 	remoteAddr := c.conn.RemoteAddr()
 	remoteNetwork := remoteAddr.Network()
@@ -174,7 +170,7 @@ func (c *client) readLoop() {
 		case <-c.ctx.Done():
 			return
 		default:
-			//add read timeout
+			// add read timeout
 			if keepAlive > 0 {
 				if err := nc.SetReadDeadline(time.Now().Add(timeOut)); err != nil {
 					log.Error("set read timeout error: ", zap.Error(err), zap.String("ClientID", c.info.clientID))
@@ -230,7 +226,6 @@ func (c *client) readLoop() {
 			b.SubmitWork(c.info.clientID, msg)
 		}
 	}
-
 }
 
 // extractPacketFields function reads a control packet and extracts only the fields
@@ -239,21 +234,16 @@ func extractPacketFields(msgPacket packets.ControlPacket) []string {
 	var fields []string
 
 	// Get packet type
-	switch msgPacket.(type) {
+	switch msgPacket := msgPacket.(type) {
 	case *packets.ConnackPacket:
 	case *packets.ConnectPacket:
 	case *packets.PublishPacket:
-		packet := msgPacket.(*packets.PublishPacket)
-		fields = append(fields, packet.TopicName)
-		break
-
+		fields = append(fields, msgPacket.TopicName)
 	case *packets.SubscribePacket:
-		packet := msgPacket.(*packets.SubscribePacket)
-		fields = append(fields, packet.Topics...)
+		fields = append(fields, msgPacket.Topics...)
 	case *packets.SubackPacket:
 	case *packets.UnsubscribePacket:
-		packet := msgPacket.(*packets.UnsubscribePacket)
-		fields = append(fields, packet.Topics...)
+		fields = append(fields, msgPacket.Topics...)
 	}
 
 	return fields
@@ -262,7 +252,6 @@ func extractPacketFields(msgPacket packets.ControlPacket) []string {
 // validatePacketFields function checks if any of control packets fields has ill-formed
 // UTF-8 string
 func validatePacketFields(msgPacket packets.ControlPacket) (validFields bool) {
-
 	// Extract just fields that needs validation
 	fields := extractPacketFields(msgPacket)
 
@@ -339,37 +328,34 @@ func ProcessMessage(msg *Message) {
 		}
 
 		// Update client status
-		//c.status = Disconnected
+		// c.status = Disconnected
 
 		log.Error("Client disconnected due to malformed packet", zap.String("ClientID", c.info.clientID))
 
 		return
 	}
 
-	switch ca.(type) {
+	switch ca := ca.(type) {
 	case *packets.ConnackPacket:
 	case *packets.ConnectPacket:
 	case *packets.PublishPacket:
-		packet := ca.(*packets.PublishPacket)
-
-		c.ProcessPublish(packet)
+		c.ProcessPublish(ca)
 	case *packets.PubackPacket:
-		packet := ca.(*packets.PubackPacket)
 		c.outboundSendMu.Lock()
 		c.inflightMu.Lock()
-		if elem, found := c.inflight[packet.MessageID]; found && elem.packet.Qos == QosAtLeastOnce && elem.status == Publish {
-			if err := c.persistOutbound(packet.MessageID, nil); err != nil {
+		if elem, found := c.inflight[ca.MessageID]; found && elem.packet.Qos == QosAtLeastOnce && elem.status == Publish {
+			if err := c.persistOutbound(ca.MessageID, nil); err != nil {
 				c.inflightMu.Unlock()
 				c.outboundSendMu.Unlock()
 				closeAfterRoute = true
 				return
 			}
 			if c.session != nil {
-				c.session.UpdateOutbound(c.outboundOwner, packet.MessageID, nil)
+				c.session.UpdateOutbound(c.outboundOwner, ca.MessageID, nil)
 			}
-			delete(c.inflight, packet.MessageID)
+			delete(c.inflight, ca.MessageID)
 		} else {
-			log.Error("Duplicated PUBACK PacketId", zap.Uint16("MessageID", packet.MessageID))
+			log.Error("Duplicated PUBACK PacketId", zap.Uint16("MessageID", ca.MessageID))
 		}
 		c.inflightMu.Unlock()
 		c.outboundSendMu.Unlock()
@@ -380,19 +366,18 @@ func ProcessMessage(msg *Message) {
 			}
 		}
 	case *packets.PubrecPacket:
-		packet := ca.(*packets.PubrecPacket)
 		c.outboundSendMu.Lock()
 		c.inflightMu.Lock()
-		ielem, found := c.inflight[packet.MessageID]
+		ielem, found := c.inflight[ca.MessageID]
 		valid := found && ielem.packet.Qos == QosExactlyOnce
 		if valid {
 			if c.session != nil {
-				valid = c.session.UpdateOutbound(c.outboundOwner, packet.MessageID, &sessions.OutboundMessage{Packet: ielem.packet, AwaitingPubcomp: true})
+				valid = c.session.UpdateOutbound(c.outboundOwner, ca.MessageID, &sessions.OutboundMessage{Packet: ielem.packet, AwaitingPubcomp: true})
 			}
 		}
 		if valid {
 			if ielem.status == Publish {
-				if err := c.persistOutbound(packet.MessageID, &sessions.OutboundMessage{Packet: ielem.packet, AwaitingPubcomp: true}); err != nil {
+				if err := c.persistOutbound(ca.MessageID, &sessions.OutboundMessage{Packet: ielem.packet, AwaitingPubcomp: true}); err != nil {
 					c.inflightMu.Unlock()
 					c.outboundSendMu.Unlock()
 					closeAfterRoute = true
@@ -401,22 +386,22 @@ func ProcessMessage(msg *Message) {
 				ielem.status = Pubrel
 				ielem.timestamp = time.Now().Unix()
 			} else if ielem.status == Pubrel {
-				log.Error("Duplicated PUBREC PacketId", zap.Uint16("MessageID", packet.MessageID))
+				log.Error("Duplicated PUBREC PacketId", zap.Uint16("MessageID", ca.MessageID))
 			}
 		} else {
-			log.Error("The PUBREC PacketId is not found.", zap.Uint16("MessageID", packet.MessageID))
+			log.Error("The PUBREC PacketId is not found.", zap.Uint16("MessageID", ca.MessageID))
 		}
 		c.inflightMu.Unlock()
 		if !valid {
 			c.outboundSendMu.Unlock()
 			if c.mqtt5 != nil {
-				_ = c.WriterPacket(&mqtt5WirePacket{wire: &mqtt5.Pubrel{PacketID: packet.MessageID, ReasonCode: 0x92, Properties: &mqtt5.Properties{}}})
+				_ = c.WriterPacket(&mqtt5WirePacket{wire: &mqtt5.Pubrel{PacketID: ca.MessageID, ReasonCode: 0x92, Properties: &mqtt5.Properties{}}})
 			}
 			return
 		}
 
 		pubrel := packets.NewControlPacket(packets.Pubrel).(*packets.PubrelPacket)
-		pubrel.MessageID = packet.MessageID
+		pubrel.MessageID = ca.MessageID
 		err := c.WriterPacket(pubrel)
 		c.outboundSendMu.Unlock()
 		if err != nil {
@@ -428,33 +413,31 @@ func ProcessMessage(msg *Message) {
 			closeAfterRoute = true
 			return
 		}
-		packet := ca.(*packets.PubrelPacket)
-		relErr := c.pubRel(packet.MessageID)
+		relErr := c.pubRel(ca.MessageID)
 		if c.mqtt5 != nil && relErr != nil {
-			_ = c.WriterPacket(&mqtt5WirePacket{wire: &mqtt5.Pubcomp{PacketID: packet.MessageID, ReasonCode: 0x92, Properties: &mqtt5.Properties{}}})
+			_ = c.WriterPacket(&mqtt5WirePacket{wire: &mqtt5.Pubcomp{PacketID: ca.MessageID, ReasonCode: 0x92, Properties: &mqtt5.Properties{}}})
 			return
 		}
 		pubcomp := packets.NewControlPacket(packets.Pubcomp).(*packets.PubcompPacket)
-		pubcomp.MessageID = packet.MessageID
+		pubcomp.MessageID = ca.MessageID
 		if err := c.WriterPacket(pubcomp); err != nil {
 			log.Error("send pubcomp error, ", zap.Error(err), zap.String("ClientID", c.info.clientID))
 			return
 		}
 	case *packets.PubcompPacket:
-		packet := ca.(*packets.PubcompPacket)
 		c.outboundSendMu.Lock()
 		c.inflightMu.Lock()
-		if elem, found := c.inflight[packet.MessageID]; found && elem.packet.Qos == QosExactlyOnce && elem.status == Pubrel {
-			if err := c.persistOutbound(packet.MessageID, nil); err != nil {
+		if elem, found := c.inflight[ca.MessageID]; found && elem.packet.Qos == QosExactlyOnce && elem.status == Pubrel {
+			if err := c.persistOutbound(ca.MessageID, nil); err != nil {
 				c.inflightMu.Unlock()
 				c.outboundSendMu.Unlock()
 				closeAfterRoute = true
 				return
 			}
 			if c.session != nil {
-				c.session.UpdateOutbound(c.outboundOwner, packet.MessageID, nil)
+				c.session.UpdateOutbound(c.outboundOwner, ca.MessageID, nil)
 			}
-			delete(c.inflight, packet.MessageID)
+			delete(c.inflight, ca.MessageID)
 		}
 		c.inflightMu.Unlock()
 		c.outboundSendMu.Unlock()
@@ -465,16 +448,14 @@ func ProcessMessage(msg *Message) {
 			}
 		}
 	case *packets.SubscribePacket:
-		packet := ca.(*packets.SubscribePacket)
 		if msg.mqtt5 != nil {
-			c.processClientSubscribeOptions(packet, msg.mqtt5.Content.(*mqtt5.Subscribe))
+			c.processClientSubscribeOptions(ca, msg.mqtt5.Content.(*mqtt5.Subscribe))
 		} else {
-			c.ProcessSubscribe(packet)
+			c.ProcessSubscribe(ca)
 		}
 	case *packets.SubackPacket:
 	case *packets.UnsubscribePacket:
-		packet := ca.(*packets.UnsubscribePacket)
-		c.ProcessUnSubscribe(packet)
+		c.ProcessUnSubscribe(ca)
 	case *packets.UnsubackPacket:
 	case *packets.PingreqPacket:
 		c.ProcessPing()
@@ -542,7 +523,7 @@ func (c *client) processClientPublish(packet *packets.PublishPacket) {
 		registered = true
 	}
 
-	//publish to bridge mq
+	// publish to bridge mq
 	cost := c.broker.Publish(&bridge.Elements{
 		ClientID:  c.info.clientID,
 		Username:  c.info.username,
@@ -599,7 +580,6 @@ func (c *client) processClientPublish(packet *packets.PublishPacket) {
 		log.Error("publish with unknown qos", zap.String("ClientID", c.info.clientID))
 		return
 	}
-
 }
 
 func (c *client) ProcessPublishMessage(packet *packets.PublishPacket) error {
@@ -664,7 +644,7 @@ func (c *client) processClientSubscribeOptions(packet *packets.SubscribePacket, 
 			retcodes = append(retcodes, QosFailure)
 			continue
 		}
-		//check topic auth for client
+		// check topic auth for client
 		if !b.CheckTopicAuth(SUB, c.info.clientID, c.info.username, c.info.remoteIP, topic) {
 			log.Error("Sub topic Auth failed: ", zap.String("topic", topic), zap.String("ClientID", c.info.clientID))
 			retcodes = append(retcodes, QosFailure)
@@ -765,7 +745,7 @@ func (c *client) processClientSubscribeOptions(packet *packets.SubscribePacket, 
 		return
 	}
 
-	//process retain message
+	// process retain message
 	for _, rm := range retainedMsgs {
 		qos := rm.packet.Qos
 		if rm.sub.qos < qos {
@@ -819,7 +799,7 @@ func (c *client) processClientUnSubscribe(packet *packets.UnsubscribePacket) {
 
 	for _, topic := range unSubTopics {
 		{
-			//publish kafka
+			// publish kafka
 
 			b.Publish(&bridge.Elements{
 				ClientID:  c.info.clientID,
@@ -828,7 +808,6 @@ func (c *client) processClientUnSubscribe(packet *packets.UnsubscribePacket) {
 				Timestamp: time.Now().Unix(),
 				Topic:     topic,
 			})
-
 		}
 
 		c.stateMu.Lock()
@@ -921,7 +900,7 @@ func (c *client) close() func() {
 	c.inflightMu.Lock()
 	clear(c.inflight)
 	c.inflightMu.Unlock()
-	//wait for message complete
+	// wait for message complete
 	// time.Sleep(1 * time.Second)
 	// c.status = Disconnected
 
@@ -969,7 +948,7 @@ func (c *client) close() func() {
 		}
 		b.Publish(&bridge.Elements{ClientID: c.info.clientID, Username: c.info.username, Action: bridge.Disconnect, Timestamp: time.Now().Unix()})
 		if c.typ == CLIENT {
-			var pubPack = PubPacket{}
+			pubPack := PubPacket{}
 			if willMsg != nil {
 				pubPack.TopicName = willMsg.TopicName
 				pubPack.Payload = willMsg.Payload
@@ -981,7 +960,7 @@ func (c *client) close() func() {
 				Keepalive: c.info.keepalive,
 				WillMsg:   pubPack,
 			}
-			//offline notification
+			// offline notification
 			b.OnlineOfflineNotification(pubInfo, false, lastMsgTime)
 		}
 
@@ -992,13 +971,14 @@ func (c *client) close() func() {
 			b.PublishMessage(willMsg)
 		}
 	}
-
 }
 
-var errTakeoverWrite = errors.New("write interrupted by client takeover")
-var errTakeoverWriteStarted = errors.New("interrupted write may have sent a partial packet")
-var errWriteNotStarted = errors.New("packet write not started")
-var errWriteZeroBytes = errors.New("packet write sent zero bytes")
+var (
+	errTakeoverWrite        = errors.New("write interrupted by client takeover")
+	errTakeoverWriteStarted = errors.New("interrupted write may have sent a partial packet")
+	errWriteNotStarted      = errors.New("packet write not started")
+	errWriteZeroBytes       = errors.New("packet write sent zero bytes")
+)
 
 type countingPacketWriter struct {
 	conn    net.Conn
