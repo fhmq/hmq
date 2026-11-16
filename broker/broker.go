@@ -63,6 +63,7 @@ type Broker struct {
 	closeOnce        sync.Once
 	listeners        map[net.Listener]struct{}
 	connections      map[net.Conn]struct{}
+	connectionsPerIP map[string]int
 	servers          map[*http.Server]struct{}
 	jobs             sync.WaitGroup
 	ctx              context.Context
@@ -197,6 +198,18 @@ func NewBroker(config *Config) (*Broker, error) {
 		configCopy.Cluster.Quorum.Peers[id] = address
 	}
 	config = &configCopy
+	if config.ConnectTimeoutSeconds < 0 || config.MaxConnections < 0 || config.MaxConnectionsPerIP < 0 {
+		return nil, errors.New("connection limits must not be negative")
+	}
+	if config.ConnectTimeoutSeconds == 0 {
+		config.ConnectTimeoutSeconds = 10
+	}
+	if config.MaxConnections == 0 {
+		config.MaxConnections = 10000
+	}
+	if config.MaxConnectionsPerIP == 0 {
+		config.MaxConnectionsPerIP = 256
+	}
 	if err := validateSessionLogPath(config); err != nil {
 		return nil, err
 	}
@@ -401,14 +414,29 @@ func (b *Broker) trackHTTP(h http.Handler) http.Handler {
 	})
 }
 
-func (b *Broker) registerConnection(c net.Conn) bool {
+func (b *Broker) registerConnection(c net.Conn) (admitted bool) {
 	b.lifecycleMu.Lock()
-	defer b.lifecycleMu.Unlock()
+	defer func() {
+		b.lifecycleMu.Unlock()
+		if !admitted {
+			_ = c.SetDeadline(time.Now())
+			_ = c.Close()
+		}
+	}()
 	select {
 	case <-b.stopped:
-		c.Close()
 		return false
 	default:
+	}
+	ip := connectionIP(c)
+	if b.config != nil && (len(b.connections) >= b.config.MaxConnections || ip != "" && b.connectionsPerIP[ip] >= b.config.MaxConnectionsPerIP) {
+		return false
+	}
+	if b.connectionsPerIP == nil {
+		b.connectionsPerIP = make(map[string]int)
+	}
+	if ip != "" {
+		b.connectionsPerIP[ip]++
 	}
 	b.connections[c] = struct{}{}
 	b.jobs.Add(1)
@@ -417,7 +445,16 @@ func (b *Broker) registerConnection(c net.Conn) bool {
 
 func (b *Broker) unregisterConnection(c net.Conn) {
 	b.lifecycleMu.Lock()
-	delete(b.connections, c)
+	if _, ok := b.connections[c]; ok {
+		ip := connectionIP(c)
+		if ip != "" {
+			b.connectionsPerIP[ip]--
+			if b.connectionsPerIP[ip] == 0 {
+				delete(b.connectionsPerIP, ip)
+			}
+		}
+		delete(b.connections, c)
+	}
 	b.lifecycleMu.Unlock()
 	c.Close()
 	b.jobs.Done()
@@ -552,7 +589,7 @@ func (b *Broker) StartWebsocketListening() {
 	if !b.registerListener(l) {
 		return
 	}
-	server := &http.Server{Handler: b.trackHTTP(mux)}
+	server := &http.Server{Handler: b.trackHTTP(mux), ReadHeaderTimeout: time.Duration(b.config.ConnectTimeoutSeconds) * time.Second}
 	if !b.registerServer(server) {
 		l.Close()
 		return
@@ -637,14 +674,7 @@ func (b *Broker) StartClientListening(Tls bool) {
 		}
 
 		tmpDelay = ACCEPT_MIN_SLEEP
-		if !b.launch(func() {
-			err := b.handleConnection(CLIENT, conn)
-			if err != nil {
-				conn.Close()
-			}
-		}) {
-			conn.Close()
-		}
+		b.launchClientConnection(conn)
 	}
 }
 
@@ -701,14 +731,7 @@ func (b *Broker) StartUnixSocketClientListening(socketPath string, unixSocket bo
 		}
 
 		tmpDelay = ACCEPT_MIN_SLEEP
-		if !b.launch(func() {
-			err := b.handleConnection(CLIENT, conn)
-			if err != nil {
-				conn.Close()
-			}
-		}) {
-			conn.Close()
-		}
+		b.launchClientConnection(conn)
 	}
 }
 
@@ -728,7 +751,23 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) error {
 	if !b.registerConnection(conn) {
 		return errors.New("broker closed")
 	}
+	return b.handleAdmittedConnection(typ, conn)
+}
+
+func (b *Broker) launchClientConnection(conn net.Conn) {
+	if !b.registerConnection(conn) {
+		return
+	}
+	if !b.launch(func() { _ = b.handleAdmittedConnection(CLIENT, conn) }) {
+		b.unregisterConnection(conn)
+	}
+}
+
+func (b *Broker) handleAdmittedConnection(typ int, conn net.Conn) error {
 	defer b.unregisterConnection(conn)
+	if err := conn.SetDeadline(time.Now().Add(time.Duration(b.config.ConnectTimeoutSeconds) * time.Second)); err != nil {
+		return err
+	}
 	// process connect packet
 	msg, state, err := readClientConnect(conn)
 	if err != nil {
@@ -739,6 +778,9 @@ func (b *Broker) handleConnection(typ int, conn net.Conn) error {
 	}
 	if msg == nil {
 		return errors.New("received nil packet")
+	}
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		return err
 	}
 
 	log.Info("read connect from ", getAdditionalLogFields(msg.ClientIdentifier, conn)...)
@@ -1141,6 +1183,13 @@ func (b *Broker) publishCommittedLocal(packet *packets.PublishPacket) error {
 			qos = packet.Qos
 		}
 		err := publish(active, packet, qos)
+		if errors.Is(err, errSlowConsumer) {
+			interruptedClient = current
+			return false, nil
+		}
+		if s.share && errors.Is(err, errMQTT5DeliveryTooLarge) {
+			return false, nil
+		}
 		if errors.Is(err, errTakeoverWrite) {
 			if errors.Is(err, errTakeoverWriteStarted) {
 				interruptedClient = current

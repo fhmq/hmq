@@ -10,7 +10,7 @@ MQTT 3.x and 5 clients share the existing TCP, TLS and WebSocket listeners.
 See [MQTT 5 support and negotiated limits](broker/MQTT5.md) before deployment.
 
 ## RUNNING
-Use Go 1.27.3 or newer to build from source:
+Use Go 1.27.4 or newer to build from source:
 
 The v4 Go module path is `github.com/fhmq/hmq/v4`; previous imports must be
 updated. Embedders should use `broker/packets` for publications and callbacks.

@@ -24,23 +24,26 @@ var json = jsoniter.ConfigCompatibleWithStandardLibrary
 var clusterNodeIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 
 type Config struct {
-	Worker          int       `json:"workerNum"`
-	HTTPPort        string    `json:"httpPort"`
-	Host            string    `json:"host"`
-	Port            string    `json:"port"`
-	Cluster         RouteInfo `json:"cluster"`
-	Router          string    `json:"router"`
-	TlsHost         string    `json:"tlsHost"`
-	TlsPort         string    `json:"tlsPort"`
-	WsPath          string    `json:"wsPath"`
-	WsPort          string    `json:"wsPort"`
-	WsTLS           bool      `json:"wsTLS"`
-	TlsInfo         TLSInfo   `json:"tlsInfo"`
-	Debug           string    `json:"debug"`
-	Plugin          Plugins   `json:"plugins"`
-	UnixFilePath    string    `json:"unixFilePath"`
-	WindowsPipeName string    `json:"windowsPipeName"`
-	RetainedLogPath string    `json:"retainedLogPath"`
+	ConnectTimeoutSeconds int       `json:"connectTimeoutSeconds"`
+	MaxConnections        int       `json:"maxConnections"`
+	MaxConnectionsPerIP   int       `json:"maxConnectionsPerIP"`
+	Worker                int       `json:"workerNum"`
+	HTTPPort              string    `json:"httpPort"`
+	Host                  string    `json:"host"`
+	Port                  string    `json:"port"`
+	Cluster               RouteInfo `json:"cluster"`
+	Router                string    `json:"router"`
+	TlsHost               string    `json:"tlsHost"`
+	TlsPort               string    `json:"tlsPort"`
+	WsPath                string    `json:"wsPath"`
+	WsPort                string    `json:"wsPort"`
+	WsTLS                 bool      `json:"wsTLS"`
+	TlsInfo               TLSInfo   `json:"tlsInfo"`
+	Debug                 string    `json:"debug"`
+	Plugin                Plugins   `json:"plugins"`
+	UnixFilePath          string    `json:"unixFilePath"`
+	WindowsPipeName       string    `json:"windowsPipeName"`
+	RetainedLogPath       string    `json:"retainedLogPath"`
 	// ExperimentalSessionLogPath opens a standalone log; it does not enable session persistence.
 	ExperimentalSessionLogPath string `json:"experimentalSessionLogPath"`
 }

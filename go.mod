@@ -1,6 +1,6 @@
 module github.com/fhmq/hmq/v4
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/IBM/sarama v1.61.1
@@ -46,7 +46,7 @@ require (
 	github.com/jcmturner/gofork v1.7.6 // indirect
 	github.com/jcmturner/gokrb5/v8 v8.4.4 // indirect
 	github.com/jcmturner/rpc/v2 v2.0.3 // indirect
-	github.com/klauspost/compress v1.20.1 // indirect
+	github.com/klauspost/compress v1.20.2 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/mattn/go-colorable v0.1.12 // indirect

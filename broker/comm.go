@@ -3,7 +3,6 @@ package broker
 import (
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"reflect"
 	"time"
@@ -123,6 +122,8 @@ func unWrapPublishPacket(packet *packets.PublishPacket) *packets.PublishPacket {
 var ErrPacketIDExhausted = errors.New("outbound packet IDs exhausted")
 var ErrInvalidDeliveryQoS = errors.New("invalid outbound delivery QoS")
 var errDurableAccepted = errors.New("delivery durably accepted")
+var errSlowConsumer = errors.New("MQTT 5 outbound queue full")
+var errMQTT5DeliveryTooLarge = errors.New("MQTT 5 shared delivery exceeds peer maximum")
 
 func publish(sub *subscription, original *packets.PublishPacket, qos byte) error {
 	return publishDelivery(sub, original, qos, false)
@@ -169,7 +170,14 @@ func (c *client) sendPublication(packet *packets.PublishPacket, shared bool, fro
 		return nil
 	}
 	if c.mqtt5 != nil {
-		if err := c.writeClientPacket(io.Discard, packet); err != nil {
+		wire, err := mqtt5Publication(packet)
+		if err == nil {
+			_, err = mqtt5PacketSize(c.mqtt5, wire)
+		}
+		if err != nil {
+			if shared && mqtt5Reason(err) == 0x95 {
+				return errors.Join(errMQTT5DeliveryTooLarge, errWriteNotStarted)
+			}
 			if errors.Is(err, errMQTT5MessageExpired) || mqtt5Reason(err) == 0x95 {
 				return nil
 			}
@@ -196,7 +204,10 @@ func (c *client) sendPublication(packet *packets.PublishPacket, shared bool, fro
 			c.inflightMu.Unlock()
 			c.stateMu.Unlock()
 			if len(c.mqtt5.queued) >= 256 || c.mqtt5.queuedBytes+publicationSize(packet) > 4<<20 {
-				return errors.New("MQTT 5 outbound queue full")
+				if c.transport != nil {
+					_ = c.transport.Close()
+				}
+				return errors.Join(errSlowConsumer, errWriteNotStarted)
 			}
 			c.mqtt5.queued = append(c.mqtt5.queued, packet)
 			c.mqtt5.queuedBytes += publicationSize(packet)

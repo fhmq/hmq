@@ -29,7 +29,9 @@ properties and expiry metadata; MQTT 3 packet wire behavior remains unchanged.
 - Client Receive Maximum for outbound QoS traffic, held until PUBACK/PUBCOMP or
   a negative PUBREC. The broker additionally caps this window at 128 inflight
   publications. Waiting publications are bounded to 256 messages / 4 MiB per
-  connection; ordinary broker delivery-failure/backpressure behavior applies.
+  connection. Queue overflow disconnects the slow consumer without failing an
+  unrelated publisher. Shared groups try another eligible consumer on overflow
+  or when a member's maximum packet size is too small.
 - Client Maximum Packet Size, including CONNACK and control packets. Publications
   exceeding a subscriber's size limit are discarded without consuming its credit.
 - Malformed packet checks for bounded variable integers, fixed flags, duplicate
@@ -65,6 +67,19 @@ conformance:
   clocks; this implementation is not a clock-skew tolerant expiry protocol.
 
 The existing permissive sample authentication is not suitable for production.
+
+## Connection Admission
+
+All client transports use a CONNECT read/write deadline (including TLS handshake
+I/O). Configuration defaults are `connectTimeoutSeconds: 10`,
+`maxConnections: 10000`, and `maxConnectionsPerIP: 256`. Zero selects the defaults;
+negative values are invalid. Counts include admitted MQTT connections and pending
+CONNECTs and are released on disconnect. The deadline is cleared once CONNECT is
+parsed so Keep Alive zero remains valid. Limits are local to each broker.
+
+Per-IP accounting uses the socket peer, not forwarded headers. WebSocket clients
+behind one reverse proxy therefore share its IP quota. HTTP header reads are also
+bounded; use proxy/firewall admission limits for HTTP connections before upgrade.
 
 ## Example
 

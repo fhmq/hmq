@@ -102,7 +102,7 @@ func readClientConnect(conn net.Conn) (*packets.ConnectPacket, *mqtt5State, erro
 	return legacy, state, nil
 }
 
-func writeMQTT5(w io.Writer, state *mqtt5State, p mqtt5.Packet) error {
+func mqtt5PacketSize(state *mqtt5State, p mqtt5.Packet) (int, error) {
 	var bodySize uint64
 	for _, part := range p.Buffers() {
 		bodySize += uint64(len(part))
@@ -112,7 +112,15 @@ func writeMQTT5(w io.Writer, state *mqtt5State, p mqtt5.Packet) error {
 		wireSize++
 	}
 	if bodySize > 268435455 || wireSize > uint64(state.maximumPacket) {
-		return &mqtt5Error{0x95, "outgoing packet exceeds peer maximum"}
+		return 0, &mqtt5Error{0x95, "outgoing packet exceeds peer maximum"}
+	}
+	return int(wireSize), nil
+}
+
+func writeMQTT5(w io.Writer, state *mqtt5State, p mqtt5.Packet) error {
+	wireSize, err := mqtt5PacketSize(state, p)
+	if err != nil {
+		return err
 	}
 	var data bytes.Buffer
 	data.Grow(int(wireSize))
@@ -276,22 +284,11 @@ func (c *client) writeClientPacket(w io.Writer, p packets.ControlPacket) error {
 	var wire mqtt5.Packet
 	switch v := p.(type) {
 	case *packets.PublishPacket:
-		props := &mqtt5.Properties{}
-		if v.Metadata != nil {
-			m := packets.CloneMetadata(v.Metadata)
-			if m.Properties != nil {
-				props = m.Properties
-			}
-			if !m.ExpiresAt.IsZero() {
-				remaining := time.Until(m.ExpiresAt)
-				if remaining <= 0 {
-					return errMQTT5MessageExpired
-				}
-				seconds := uint32((remaining + time.Second - 1) / time.Second)
-				props.MessageExpiry = &seconds
-			}
+		var err error
+		wire, err = mqtt5Publication(v)
+		if err != nil {
+			return err
 		}
-		wire = &mqtt5.Publish{Topic: v.TopicName, Payload: v.Payload, PacketID: v.MessageID, QoS: v.Qos, Retain: v.Retain, Duplicate: v.Dup, Properties: props}
 	case *packets.PubackPacket:
 		wire = &mqtt5.Puback{PacketID: v.MessageID, Properties: &mqtt5.Properties{}}
 	case *packets.PubrecPacket:
@@ -310,6 +307,25 @@ func (c *client) writeClientPacket(w io.Writer, p packets.ControlPacket) error {
 		return fmt.Errorf("unsupported MQTT 5 output %T", p)
 	}
 	return writeMQTT5(w, c.mqtt5, wire)
+}
+
+func mqtt5Publication(v *packets.PublishPacket) (mqtt5.Packet, error) {
+	props := &mqtt5.Properties{}
+	if v.Metadata != nil {
+		m := packets.CloneMetadata(v.Metadata)
+		if m.Properties != nil {
+			props = m.Properties
+		}
+		if !m.ExpiresAt.IsZero() {
+			remaining := time.Until(m.ExpiresAt)
+			if remaining <= 0 {
+				return nil, errMQTT5MessageExpired
+			}
+			seconds := uint32((remaining + time.Second - 1) / time.Second)
+			props.MessageExpiry = &seconds
+		}
+	}
+	return &mqtt5.Publish{Topic: v.TopicName, Payload: v.Payload, PacketID: v.MessageID, QoS: v.Qos, Retain: v.Retain, Duplicate: v.Dup, Properties: props}, nil
 }
 
 func (c *client) mqtt5Disconnect(reason byte) {
