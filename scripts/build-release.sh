@@ -59,7 +59,7 @@ for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; d
   while IFS= read -r -d '' document; do
     mkdir -p "$package/$(dirname "$document")"
     cp "$document" "$package/$document"
-  done < <(find broker -type f -name '*.md' -print0)
+  done < <(find broker deploy/compose -type f -name '*.md' -print0)
   # Stable archive timestamps also make retrying the same build predictable.
   find "$package" -exec touch -t 200001010000.00 {} +
   if [[ "$os" == windows ]]; then

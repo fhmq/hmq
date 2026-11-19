@@ -250,6 +250,10 @@ func (p *Plugins) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	p.Auth = auth.NewAuth(named.Auth)
+	if named.Bridge == "" || named.Bridge == "none" {
+		p.Bridge = nil
+		return nil
+	}
 	p.Bridge, err = bridge.NewBridgeMQ(named.Bridge)
 	return err
 }

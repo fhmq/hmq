@@ -1,0 +1,48 @@
+name: hmq-local
+x-broker: &broker
+  image: hmq-local:compose
+  build:
+    context: ../..
+  restart: unless-stopped
+  depends_on:
+    init:
+      condition: service_completed_successfully
+  stop_grace_period: 15s
+services:
+  init:
+    image: golang:1.27.4
+    working_dir: /src
+    command: [go, run, -buildvcs=false, ./deploy/compose/setup, /runtime]
+    volumes:
+      - ../..:/src:ro
+      - runtime:/runtime
+  single:
+    <<: *broker
+    profiles: [single]
+    command: [--config, /runtime/single.json]
+    ports: ["127.0.0.1:11883:1883", "127.0.0.1:18080:8080"]
+    volumes: ["runtime:/runtime:ro", "single-data:/data"]
+  a:
+    <<: *broker
+    profiles: [cluster]
+    command: [--config, /runtime/a.json]
+    ports: ["127.0.0.1:21883:1883", "127.0.0.1:28080:8080"]
+    volumes: ["runtime:/runtime:ro", "a-data:/data"]
+  b:
+    <<: *broker
+    profiles: [cluster]
+    command: [--config, /runtime/b.json]
+    ports: ["127.0.0.1:31883:1883", "127.0.0.1:38080:8080"]
+    volumes: ["runtime:/runtime:ro", "b-data:/data"]
+  c:
+    <<: *broker
+    profiles: [cluster]
+    command: [--config, /runtime/c.json]
+    ports: ["127.0.0.1:41883:1883", "127.0.0.1:48080:8080"]
+    volumes: ["runtime:/runtime:ro", "c-data:/data"]
+volumes:
+  runtime:
+  single-data:
+  a-data:
+  b-data:
+  c-data:
