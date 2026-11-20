@@ -8,12 +8,14 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	mqtt5 "github.com/eclipse/paho.golang/packets"
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"github.com/fhmq/hmq/v4/broker/packets"
 )
 
 var ports = map[string]int{"single": 11883, "a": 21883, "b": 31883, "c": 41883}
@@ -23,6 +25,18 @@ func enabled(t *testing.T) {
 	t.Helper()
 	if os.Getenv("HMQ_COMPOSE_TEST") != "1" {
 		t.Skip("set HMQ_COMPOSE_TEST=1 after starting Compose")
+	}
+	for _, node := range []string{"single", "a", "b", "c"} {
+		prefix := "HMQ_" + strings.ToUpper(node)
+		for suffix, table := range map[string]map[string]int{"_MQTT_PORT": ports, "_HTTP_PORT": monitors} {
+			if value := os.Getenv(prefix + suffix); value != "" {
+				port, err := strconv.Atoi(value)
+				if err != nil || port < 1 || port > 65535 {
+					t.Fatalf("invalid %s: %q", prefix+suffix, value)
+				}
+				table[node] = port
+			}
+		}
 	}
 }
 func compose(t *testing.T, args ...string) {
@@ -135,7 +149,7 @@ func mqtt5RoundTrip(t *testing.T, publisher, subscriber string) {
 	if !ok || ack.ReasonCode != 0 {
 		t.Fatalf("CONNACK %v", p)
 	}
-	if publisher != "single" && (ack.Properties.MaximumQOS == nil || *ack.Properties.MaximumQOS != 1 || ack.Properties.RetainAvailable == nil || *ack.Properties.RetainAvailable != 0 || ack.Properties.SharedSubAvailable == nil || *ack.Properties.SharedSubAvailable != 0) {
+	if publisher != "single" && (ack.Properties.MaximumQOS != nil || ack.Properties.RetainAvailable == nil || *ack.Properties.RetainAvailable != 0 || ack.Properties.SharedSubAvailable == nil || *ack.Properties.SharedSubAvailable != 0) {
 		t.Fatalf("quorum capability flags missing: %v", ack)
 	}
 	receiver, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", ports[subscriber]), 3*time.Second)
@@ -213,7 +227,7 @@ func TestStandaloneWill(t *testing.T) {
 	topic := fmt.Sprintf("compose/will/%d", time.Now().UnixNano())
 	got := make(chan string, 1)
 	waitToken(t, sub.Subscribe(topic, 1, func(_ mqtt.Client, m mqtt.Message) { got <- string(m.Payload()) }))
-	conn, err := net.DialTimeout("tcp", "127.0.0.1:11883", 3*time.Second)
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", ports["single"]), 3*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,13 +320,24 @@ func TestQuorumLifecycle(t *testing.T) {
 	if other == next {
 		other = followers[1]
 	}
-	compose(t, "stop", "-t", "3", other)
 	lone := client(t, next)
+	qos2 := qos2Connect(t, next, fmt.Sprintf("minority-qos2-%d", time.Now().UnixNano()), false)
+	p := packets.NewControlPacket(packets.Publish).(*packets.PublishPacket)
+	p.Qos, p.MessageID, p.TopicName, p.Payload = 2, 1, "compose/minority/qos2", []byte("pending")
+	qos2Write(t, qos2, p)
+	qos2Read[*packets.PubrecPacket](t, qos2)
+	compose(t, "stop", "-t", "3", other)
+	rel := packets.NewControlPacket(packets.Pubrel).(*packets.PubrelPacket)
+	rel.MessageID = 1
+	qos2Write(t, qos2, rel)
+	_ = qos2.SetReadDeadline(time.Now().Add(8 * time.Second))
+	if ack, err := packets.ReadPacket(qos2); err == nil {
+		t.Fatalf("minority returned a QoS2 response: %#v", ack)
+	}
 	token := lone.Publish(fmt.Sprintf("compose/no-majority/%d", time.Now().UnixNano()), 1, false, "must-not-ack")
 	if token.WaitTimeout(8*time.Second) && token.Error() == nil {
 		t.Fatal("QoS1 accepted without majority")
 	}
-	t.Logf("minority publication received no success acknowledgment (client error: %v)", token.Error())
 	compose(t, "start", "a", "b", "c")
 	leader(t, nodes)
 	exchange(t, "a", "c", 1, false)

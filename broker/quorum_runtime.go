@@ -31,7 +31,7 @@ func (b *Broker) quorumEnabled() bool {
 func validateQuorumConfig(config *Config) error {
 	c, q := config.Cluster, config.Cluster.Quorum
 	if !q.Enabled {
-		if q.DataDir != "" || q.Listen != "" || len(q.Peers) != 0 {
+		if q.DataDir != "" || q.Listen != "" || len(q.Peers) != 0 || q.SessionPersistence {
 			return errors.New("quorum settings require enabled mode")
 		}
 		return nil
@@ -93,6 +93,7 @@ func validateQuorumConfig(config *Config) error {
 }
 
 type quorumRuntime struct {
+	sessions   *quorumSessions
 	forward    *quorumForward
 	mu         sync.RWMutex
 	node       *replication.Node
@@ -170,7 +171,11 @@ func openQuorumRuntime(c RouteInfo, serverTLS, clientTLS *tls.Config) (*quorumRu
 	if exists[0] != exists[1] {
 		return nil, errors.New("quorum: incomplete raft/delivery WAL pair; restore complete node state")
 	}
-	layer, err := replication.ListenTLS(replication.TLSStreamConfig{ID: c.NodeID, ClusterID: c.ClusterID, Listen: c.Quorum.Listen, Peers: c.Quorum.Peers, ServerTLS: serverTLS, ClientTLS: clientTLS, Timeout: 5 * time.Second})
+	application := ""
+	if c.Quorum.SessionPersistence {
+		application = "sessions-v1"
+	}
+	layer, err := replication.ListenTLS(replication.TLSStreamConfig{ID: c.NodeID, ClusterID: c.ClusterID, Listen: c.Quorum.Listen, Peers: c.Quorum.Peers, ServerTLS: serverTLS, ClientTLS: clientTLS, Timeout: 5 * time.Second, Application: application})
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +189,7 @@ func openQuorumRuntime(c RouteInfo, serverTLS, clientTLS *tls.Config) (*quorumRu
 	for _, id := range ids {
 		servers = append(servers, raft.Server{ID: raft.ServerID(id), Address: raft.ServerAddress(c.Quorum.Peers[id]), Suffrage: raft.Voter})
 	}
-	node, err := replication.Open(replication.Config{ID: c.NodeID, ClusterID: c.ClusterID, Dir: dir, Transport: transport, Bootstrap: servers})
+	node, err := replication.Open(replication.Config{ID: c.NodeID, ClusterID: c.ClusterID, Dir: dir, Transport: transport, Bootstrap: servers, Application: application})
 	if err != nil {
 		_ = transport.Close()
 		return nil, err
@@ -307,6 +312,16 @@ func (r *quorumRuntime) publish(p *packets.PublishPacket) error {
 func (c *client) processQuorumPublish(p *packets.PublishPacket) {
 	c.publishMu.Lock()
 	defer c.publishMu.Unlock()
+	if p.Qos == 2 && c.durableEpoch != 0 {
+		check := *p
+		check.Qos = 1
+		if p.MessageID == 0 || !validQuorumPublication(&check) ||
+			!c.broker.CheckTopicAuth(PUB, c.info.clientID, c.info.username, c.info.remoteIP, p.TopicName) ||
+			c.receiveDurableQoS2(p) != nil {
+			c.Close()
+		}
+		return
+	}
 	if c.typ != CLIENT || !validQuorumPublication(p) || (p.Qos == 1 && p.MessageID == 0) || !c.broker.CheckTopicAuth(PUB, c.info.clientID, c.info.username, c.info.remoteIP, p.TopicName) {
 		c.Close()
 		return
@@ -355,18 +370,7 @@ func (r *quorumRuntime) startConsumer(id, clusterID string, deliver func(*packet
 					return
 				default:
 				}
-				var msg clusterPublish
-				if err = stdjson.Unmarshal(entry.Payload, &msg); err != nil {
-					break
-				}
-				p := packets.NewControlPacket(packets.Publish).(*packets.PublishPacket)
-				p.TopicName, p.Payload, p.Qos, p.Retain = msg.Topic, msg.Payload, msg.QoS, msg.Retain
-				p.Metadata = packets.CloneMetadata(msg.Metadata)
-				if !validQuorumPublication(p) {
-					err = ErrQuorumRoutingUnavailable
-					break
-				}
-				if err = deliver(p); err != nil {
+				if err = r.consumeEntry(entry, deliver); err != nil {
 					break
 				}
 				data, _ := stdjson.Marshal(quorumCursorRecord{1, id, clusterID, entry.Index})
@@ -392,6 +396,34 @@ func (r *quorumRuntime) startConsumer(id, clusterID string, deliver func(*packet
 	}()
 }
 
+func (r *quorumRuntime) consumeEntry(entry replication.Entry, deliver func(*packets.PublishPacket) error) error {
+	var msg clusterPublish
+	if r.sessions != nil {
+		res, _, err := r.sessions.advance(entry.Index)
+		if err != nil {
+			return err
+		}
+		if decodeQuorumSession(entry.Payload) != nil {
+			if res.message.Topic == "" {
+				return nil
+			}
+			m := res.message
+			msg = clusterPublish{Topic: m.Topic, Payload: m.Payload, QoS: m.QoS, Metadata: m.Metadata}
+		}
+	}
+	if msg.Topic == "" {
+		if err := stdjson.Unmarshal(entry.Payload, &msg); err != nil {
+			return err
+		}
+	}
+	p := packets.NewControlPacket(packets.Publish).(*packets.PublishPacket)
+	p.TopicName, p.Payload, p.Qos, p.Retain, p.Metadata = msg.Topic, msg.Payload, msg.QoS, msg.Retain, packets.CloneMetadata(msg.Metadata)
+	if !validQuorumPublication(p) && !(r.sessions != nil && p.Qos == 2 && !p.Retain && p.TopicName != "") {
+		return ErrQuorumRoutingUnavailable
+	}
+	return deliver(p)
+}
+
 type quorumHealth struct {
 	State          string `json:"state"`
 	Partitions     int    `json:"partitions"`
@@ -407,6 +439,9 @@ func (r *quorumRuntime) health() quorumHealth {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	h := quorumHealth{State: "closed", Partitions: 1, Routing: "quorum_qos01_nonretained", Cursor: r.cursor, ConsumerFailed: r.consumeErr != nil}
+	if r.sessions != nil {
+		h.Routing = "quorum_qos012_nonretained"
+	}
 	h.ActiveRequests, h.ProposalLimit = len(r.proposals), cap(r.proposals)
 	if !r.closed {
 		h.State = r.node.State().String()

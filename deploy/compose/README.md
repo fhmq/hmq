@@ -29,6 +29,10 @@ Each node has its own data volume. The init service generates a local CA, distin
 node certificates with URI SANs, and a random shared secret inside a named volume.
 The CA private key is not saved. Certificates and configurations are preserved on
 subsequent starts; private files are readable by the broker's UID 65532.
+For a deployment created before session persistence was enabled, use a fresh
+Compose project instead of reusing its Raft volumes. Set `COMPOSE_PROJECT_NAME`
+and, to run alongside another deployment, set `HMQ_{SINGLE,A,B,C}_{MQTT,HTTP}_PORT`
+for both Compose and the test runner. `HMQ_COMPOSE_IMAGE` can isolate the image tag.
 
 ```sh
 curl http://127.0.0.1:28080/api/v1/cluster/quorum
@@ -58,11 +62,15 @@ Tests create real host-to-container MQTT connections and exercise:
   new QoS1 publication. A timeout is an uncertain outcome, not proof of rollback.
 - Starting all nodes, then stopping and restarting the complete cluster while
   preserving data volumes; delivery cursor recovery and new publication afterward.
+- QoS 2 reconnect with the same Client ID, SIGKILL and single-node restart,
+  publisher recovery on a new leader, and subscriber PUBREL recovery after
+  restarting all three nodes. Duplicate PUBLISH/PUBREL do not enqueue a second
+  delivery. A minority does not acknowledge a pending QoS 2 release.
+- MQTT 5 persistent QoS 2 publication resumed on the same broker or another node.
 
 The cluster test deliberately stops and starts services `a`, `b`, and `c` in this
 Compose project. Do not run it against an environment serving real users or run
-multiple copies concurrently. It restores the nodes on completion. MQTT sessions
-are clean and resubscribed after reconnect; this does not test replicated sessions.
+multiple copies against the same deployment. It restores the nodes on completion.
 
 ## Stop and reset
 
@@ -81,8 +89,10 @@ Client MQTT and diagnostics are unauthenticated local evaluation endpoints using
 mock authentication. Only internal cluster traffic uses mTLS. The shared read-only
 credential volume is convenient for local evaluation, not production key isolation.
 Do not expose these ports externally or reuse these certificates/secrets elsewhere.
-Quorum is experimental, single-partition, clean-session QoS0/1 only; retained,
-QoS2, shared subscriptions and wills are not available in quorum mode. See
+Single stores sessions in `/data/sessions.wal`; the cluster stores replicated
+sessions and publications under each node's `/data/quorum`. Quorum is experimental
+and single-partition. Retained, shared subscriptions and wills are not available
+in quorum mode. See
 [cluster operations](../../conf/cluster.md). This is not multi-host, long-duration
 load, network-latency, or power-loss qualification.
 

@@ -74,10 +74,11 @@ type RouteInfo struct {
 // QuorumConfig enables the experimental fixed-membership single partition.
 // Publications are restricted to leader QoS0/1, non-retained ordinary topics.
 type QuorumConfig struct {
-	Enabled bool              `json:"enabled"`
-	DataDir string            `json:"dataDir"`
-	Listen  string            `json:"listen"`
-	Peers   map[string]string `json:"peers"`
+	SessionPersistence bool              `json:"sessionPersistence"`
+	Enabled            bool              `json:"enabled"`
+	DataDir            string            `json:"dataDir"`
+	Listen             string            `json:"listen"`
+	Peers              map[string]string `json:"peers"`
 }
 
 // ReliableConfig describes the fixed membership and local durable logs.

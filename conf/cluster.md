@@ -108,13 +108,12 @@ change these session guarantees.
 set, the broker opens and replays the session log at startup and
 holds its exclusive lock until shutdown; invalid or locked logs fail startup.
 It enables experimental single-node persistence of ordinary non-clean
-subscriptions, offline QoS 1/2 queues, and outbound QoS protocol state.
+subscriptions, offline QoS 1/2 queues, and inbound/outbound QoS 2 protocol state.
 The outbound window defaults to 128 messages; further queued messages advance
 after PUBACK or PUBCOMP is durably recorded. Persistent shared subscriptions
-are rejected. Inbound QoS 2 PUBLISH is rejected by disconnecting whenever this
-option is enabled, so this is not a complete MQTT persistent-session mode.
-It provides no cross-node session ownership, replicated session storage, or
-crash-atomic fanout. CONNECT rollback still copies the session snapshot; overall
+are rejected. QoS 2 release and durable subscriber enqueue share one record.
+It provides no cross-node session ownership or replicated session storage.
+CONNECT rollback still copies the session snapshot; overall
 recovery memory is not bounded independently of backlog. See
 [`RUNTIME.md`](../broker/sessionstore/RUNTIME.md) for the operational limits.
 The path must differ from retained and reliable log paths, including aliases
@@ -165,8 +164,8 @@ bound also fails startup; that upper bound is not used as a commit proof.
 Dynamic membership and migration are not implemented. Leave quorum settings absent
 when disabled; the default routing behavior does not change.
 
-This is one fixed experimental Raft partition, not topic partitioning or replicated
-MQTT sessions. Leaders and followers accept ordinary non-retained QoS 0/1 publishes.
+This is one fixed experimental Raft partition, not topic partitioning. By
+default, leaders and followers accept ordinary non-retained QoS 0/1 publishes.
 Followers forward to the observed leader over authenticated cluster connections.
 Configure every other member's **cluster** listen address in each node's `seeds`;
 Raft peer addresses are separate and cannot supply these direct connections.
@@ -190,16 +189,25 @@ receipt: PUBACK confirms the publication log, not every replica's delivery or a
 subscriber's acknowledgment. No-subscriber entries are considered locally routed.
 The log and cursor have no compaction; monitor disk use and kernel capacity.
 
-Only clean online sessions are supported. Reconnect and resubscribe after restart;
-subscriptions and outbound inflight state are not replicated or persisted. QoS 2,
-retained publications/storage, shared subscriptions, QoS 2 subscriptions, will,
-non-clean sessions, bridge plugins and `experimentalSessionLogPath` are rejected.
+Without `sessionPersistence` only clean online sessions are supported. Set
+`cluster.quorum.sessionPersistence: true` on every member, with fresh quorum data
+directories, to enable non-retained QoS 2 and replicated persistent sessions.
+Mixed profiles cannot join the same Raft group; existing data directories are
+bound to their original profile. Session commands and publication data are
+committed through the same Raft journal. Persistent subscribers' queues and
+inflight state are rebuilt independently of the transient delivery cursor.
+Reconnect using the original Client ID with MQTT 3.1.1 Clean Session=false, or
+MQTT 5 Clean Start=false with `SessionExpiryInterval=0xFFFFFFFF`.
+Retained publications/storage, shared subscriptions, Will, bridge plugins and
+`experimentalSessionLogPath` are still rejected in quorum mode.
 Reserved `$` publication topics, directed delivery and legacy cluster messages
 cannot bypass the quorum path. No bridge side effect executes before commit.
-These restrictions are explicit extension points, not complete MQTT durability.
+Session commands count toward the existing partition capacity; there is no
+safe history reclamation or production backlog quota in this profile.
 
 `GET /api/v1/cluster/quorum` reports local Raft `state`, observed `leaderID`,
-`partitions: 1`, `routing: "quorum_qos01_nonretained"`, the durable delivery
+`partitions: 1`, `routing: "quorum_qos01_nonretained"` (or
+`"quorum_qos012_nonretained"`), the durable delivery
 `cursor` and `consumerFailed`. It is a local diagnostic, not a linearizable read
 or proof of current quorum connectivity. Consumer errors do not reveal paths or
 payloads in this endpoint. See [runtime notes](../broker/QUORUM.md).

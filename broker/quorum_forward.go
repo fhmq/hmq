@@ -145,6 +145,11 @@ func quorumForwardContextError(ctx context.Context) error {
 }
 
 func (f *quorumForward) publish(data []byte) error {
+	_, err := f.commit(data)
+	return err
+}
+
+func (f *quorumForward) commit(data []byte) (uint64, error) {
 	ctx, cancel := context.WithTimeout(f.ctx, 5*time.Second)
 	defer cancel()
 	op := fmt.Sprintf("%s:%s:%d", f.id, f.boot, f.seq.Add(1))
@@ -152,17 +157,17 @@ func (f *quorumForward) publish(data []byte) error {
 	frame := quorumForwardFrameData{Domain: quorumForwardDomain, Operation: op, Digest: quorumDigest(data), Payload: data, BudgetNanos: int64(5 * time.Second)}
 	wire, _ := stdjson.Marshal(frame)
 	if len(wire) > quorumForwardFrame {
-		return replication.ErrInvalid
+		return 0, replication.ErrInvalid
 	}
 	p := &quorumPending{digest: frame.Digest, attempts: make(map[uint32]string), result: make(chan quorumForwardResult, 1)}
 	f.mu.Lock()
 	if f.closed {
 		f.mu.Unlock()
-		return storage.ErrClosed
+		return 0, storage.ErrClosed
 	}
 	if len(f.pending) >= quorumProposalLimit || f.bytes+len(data) > quorumForwardBytes {
 		f.mu.Unlock()
-		return replication.ErrBusy
+		return 0, replication.ErrBusy
 	}
 	f.pending[op] = p
 	f.bytes += len(data)
@@ -172,7 +177,7 @@ func (f *quorumForward) publish(data []byte) error {
 	defer tick.Stop()
 	for attempt := uint32(1); ; attempt++ {
 		if err := quorumForwardContextError(ctx); err != nil {
-			return err
+			return 0, err
 		}
 		_, leader := f.r.node.Leader()
 		target := string(leader)
@@ -188,33 +193,33 @@ func (f *quorumForward) publish(data []byte) error {
 			if target == f.id {
 				remaining := time.Until(deadline)
 				if remaining <= 0 {
-					return context.DeadlineExceeded
+					return 0, context.DeadlineExceeded
 				}
 				index, err := f.r.node.Publish(op, data, remaining)
 				if quorumForwardTerminalError(err) != "" {
-					return err
+					return 0, err
 				}
 				if err == nil && index != 0 && quorumForwardContextError(ctx) == nil {
-					return nil
+					return index, nil
 				}
 			} else {
 				frame.BudgetNanos = int64(time.Until(deadline))
 				if frame.BudgetNanos <= 0 {
-					return context.DeadlineExceeded
+					return 0, context.DeadlineExceeded
 				}
 				wire, _ = stdjson.Marshal(frame)
 				if len(wire) > quorumForwardFrame {
-					return replication.ErrInvalid
+					return 0, replication.ErrInvalid
 				}
 				_ = f.send(ctx, target, wire)
 			}
 		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return 0, ctx.Err()
 		case result := <-p.result:
 			if err := quorumForwardContextError(ctx); err != nil {
-				return err
+				return 0, err
 			}
 			if result.err != nil {
 				f.mu.Lock()
@@ -224,7 +229,7 @@ func (f *quorumForward) publish(data []byte) error {
 					continue
 				}
 			}
-			return result.err
+			return result.index, result.err
 		case <-tick.C:
 		}
 	}
@@ -291,7 +296,8 @@ func (f *quorumForward) handle(peer string, data []byte) {
 		return
 	}
 	var pub clusterPublish
-	if stdjson.Unmarshal(m.Payload, &pub) != nil || !validQuorumPublication(&packets.PublishPacket{FixedHeader: packets.FixedHeader{Qos: pub.QoS, Retain: pub.Retain}, TopicName: pub.Topic, Payload: pub.Payload}) {
+	if !(f.r != nil && f.r.sessions != nil && decodeQuorumSession(m.Payload) != nil) &&
+		(stdjson.Unmarshal(m.Payload, &pub) != nil || !validQuorumPublication(&packets.PublishPacket{FixedHeader: packets.FixedHeader{Qos: pub.QoS, Retain: pub.Retain}, TopicName: pub.Topic, Payload: pub.Payload})) {
 		return
 	}
 	if f.peers[peer] >= quorumForwardPeerLimit || f.workBytes+len(data) > quorumForwardBytes {

@@ -52,7 +52,7 @@ type Broker struct {
 	clients          sync.Map
 	topicsMgr        *topics.Manager
 	sessionMgr       *sessions.Manager
-	sessionLog       *sessionstore.Store
+	sessionLog       SessionStorage
 	sessionIndex     *durableIndex
 	sessionWindow    int                  // Zero selects the production default; tests may reduce it.
 	durableRouteHook func(string, string) // Test barrier, configured before publishing.
@@ -187,6 +187,12 @@ func getAdditionalLogFields(clientIdentifier string, conn net.Conn, additionalFi
 }
 
 func NewBroker(config *Config) (*Broker, error) {
+	return NewBrokerWithSessionStorage(config, nil)
+}
+
+// NewBrokerWithSessionStorage uses an injected standalone session backend.
+// After validation, the broker owns and closes the backend.
+func NewBrokerWithSessionStorage(config *Config, backend SessionStorage) (*Broker, error) {
 	if config == nil {
 		config = DefaultConfig
 	}
@@ -198,6 +204,9 @@ func NewBroker(config *Config) (*Broker, error) {
 		configCopy.Cluster.Quorum.Peers[id] = address
 	}
 	config = &configCopy
+	if backend != nil && (config.ExperimentalSessionLogPath != "" || config.Cluster.Quorum.Enabled || config.Cluster.Listen != "") {
+		return nil, errors.New("injected session storage requires a standalone broker without a configured session log")
+	}
 	if config.ConnectTimeoutSeconds < 0 || config.MaxConnections < 0 || config.MaxConnectionsPerIP < 0 {
 		return nil, errors.New("connection limits must not be negative")
 	}
@@ -253,19 +262,24 @@ func NewBroker(config *Config) (*Broker, error) {
 		return nil, err
 	}
 	if config.ExperimentalSessionLogPath != "" {
-		b.sessionLog, err = sessionstore.Open(config.ExperimentalSessionLogPath)
+		store, err := sessionstore.Open(config.ExperimentalSessionLogPath)
 		if err != nil {
 			_ = b.sessionMgr.Close()
 			_ = b.topicsMgr.Close()
 			return nil, fmt.Errorf("open experimental session log: %w", err)
 		}
+		b.sessionLog = store
+	} else {
+		b.sessionLog = backend
+	}
+	if b.sessionLog != nil {
 		if err := b.initSessionIndex(); err != nil {
 			_ = b.sessionLog.Close()
 			_ = b.sessionMgr.Close()
 			_ = b.topicsMgr.Close()
 			return nil, err
 		}
-		log.Warn("experimental single-node session persistence enabled; shared subscriptions and inbound QoS2 are unsupported")
+		log.Warn("experimental single-node session persistence enabled; persistent shared subscriptions are unsupported")
 	}
 
 	if b.config.TlsPort != "" {
@@ -312,7 +326,11 @@ func NewBroker(config *Config) (*Broker, error) {
 				b.Close()
 				return nil, err
 			}
-			b.quorumRuntime.startConsumer(c.NodeID, c.ClusterID, b.publishCommittedLocal)
+			if c.Quorum.SessionPersistence {
+				s := &quorumSessions{Store: sessionstore.NewReplica(), r: b.quorumRuntime, results: make(map[uint64]quorumSessionResult)}
+				b.quorumRuntime.sessions = s
+				b.sessionLog = s
+			}
 		}
 		sender := &runtimeNodeSender{}
 		if c.Reliable.Enabled {
@@ -367,6 +385,12 @@ func NewBroker(config *Config) (*Broker, error) {
 		}
 		sender.set(n)
 		close(gate)
+		if b.quorumRuntime != nil {
+			b.quorumRuntime.startConsumer(c.NodeID, c.ClusterID, b.publishCommittedLocal)
+			if b.quorumRuntime.sessions != nil {
+				b.launch(b.pumpQuorumSessions)
+			}
+		}
 	}
 
 	return b, nil
@@ -779,6 +803,13 @@ func (b *Broker) handleAdmittedConnection(typ int, conn net.Conn) error {
 	if msg == nil {
 		return errors.New("received nil packet")
 	}
+	resetPersistent := false
+	if state != nil && b.sessionLog != nil && state.connect.Properties.SessionExpiryInterval != nil &&
+		*state.connect.Properties.SessionExpiryInterval == ^uint32(0) {
+		state.durableSession = true
+		msg.CleanSession = false
+		resetPersistent = state.connect.CleanStart
+	}
 	if err := conn.SetDeadline(time.Time{}); err != nil {
 		return err
 	}
@@ -790,7 +821,7 @@ func (b *Broker) handleAdmittedConnection(typ int, conn net.Conn) error {
 	if state != nil {
 		connack.ReturnCode = packets.Accepted
 	}
-	if b.quorumEnabled() && (msg.WillFlag || !msg.CleanSession || typ != CLIENT) {
+	if b.quorumEnabled() && (msg.WillFlag || (!msg.CleanSession && b.sessionLog == nil) || typ != CLIENT) {
 		connack.ReturnCode = packets.ErrRefusedNotAuthorised
 	}
 
@@ -807,6 +838,11 @@ func (b *Broker) handleAdmittedConnection(typ int, conn net.Conn) error {
 			return fmt.Errorf("send connack error: %w, clientID: %v, conn: %v", err, msg.ClientIdentifier, conn)
 		}
 		return fmt.Errorf("connect packet CheckConnectAuth failed with connack.ReturnCode %v", connack.ReturnCode)
+	}
+	if s, ok := b.sessionLog.(*quorumSessions); ok {
+		if _, err := s.commit(quorumSessionCommand{SessionOp: "barrier"}); err != nil {
+			return err
+		}
 	}
 
 	willmsg := packets.NewControlPacket(packets.Publish).(*packets.PublishPacket)
@@ -864,36 +900,36 @@ func (b *Broker) handleAdmittedConnection(typ int, conn net.Conn) error {
 		}
 	}()
 
-	if state != nil && !state.connect.CleanStart {
+	if state != nil && !state.connect.CleanStart && !state.durableSession {
 		_, active := b.clients.Load(msg.ClientIdentifier)
 		_, savedErr := b.sessionMgr.Get(msg.ClientIdentifier)
 		existing := active || savedErr == nil
 		if b.sessionLog != nil {
-			_, found, _, _, inspectErr := b.sessionLog.Inspect(msg.ClientIdentifier, 0)
+			saved, _, inspectErr := b.sessionLog.Get(msg.ClientIdentifier)
 			if inspectErr != nil {
 				return inspectErr
 			}
-			existing = existing || found
+			existing = existing || saved != nil && !saved.Transient
 		}
 		if existing {
 			_ = b.writeMQTT5Connack(conn, state, 0x83)
 			return errors.New("MQTT 5 profile cannot resume existing session without Clean Start")
 		}
 	}
-	if !msg.CleanSession {
+	if !msg.CleanSession && !resetPersistent {
 		_, err = b.sessionMgr.Get(msg.ClientIdentifier)
 		connack.SessionPresent = err == nil
 		if b.sessionLog != nil && typ == CLIENT {
-			_, exists, _, _, readErr := b.sessionLog.Inspect(msg.ClientIdentifier, 0)
+			saved, _, readErr := b.sessionLog.Get(msg.ClientIdentifier)
 			if readErr != nil {
 				return readErr
 			}
-			connack.SessionPresent = exists
+			connack.SessionPresent = saved != nil && !saved.Transient
 		}
 	}
 	committedConnack := false
 	if b.sessionLog != nil && typ == CLIENT {
-		rollback, prepareErr := c.prepareSessionLog(msg.CleanSession)
+		rollback, prepareErr := c.prepareSessionLog(msg.CleanSession, resetPersistent)
 		defer func() {
 			if !committedConnack && rollback != nil {
 				if err := rollback(); err != nil {
@@ -929,6 +965,13 @@ func (b *Broker) handleAdmittedConnection(typ int, conn net.Conn) error {
 		c.session = &sessions.Session{}
 		err = c.session.Init(msg)
 	} else {
+		if b.sessionLog != nil {
+			if resetPersistent {
+				b.deleteSessionIndex(msg.ClientIdentifier)
+			}
+			// Another node may have advanced or removed cached inflight data.
+			b.sessionMgr.Del(msg.ClientIdentifier)
+		}
 		err = b.getSession(c, msg, connack)
 	}
 	if err != nil {
@@ -1136,6 +1179,13 @@ func (b *Broker) publishCommittedLocal(packet *packets.PublishPacket) error {
 	if err := b.routeDurable(packet); err != nil {
 		return err
 	}
+	return b.publishTransientLocal(packet, b.quorumEnabled())
+}
+
+func (b *Broker) publishTransientLocal(packet *packets.PublishPacket, includeDurableQoS0 bool) error {
+	if packet.Metadata != nil && !packet.Metadata.ExpiresAt.IsZero() && !time.Now().Before(packet.Metadata.ExpiresAt) {
+		return nil
+	}
 	var subs []interface{}
 	var qoss []byte
 	b.mu.Lock()
@@ -1161,7 +1211,7 @@ func (b *Broker) publishCommittedLocal(packet *packets.PublishPacket) error {
 			return false, nil
 		}
 		current, ok := value.(*client)
-		if ok && current.durable() && !s.share {
+		if ok && current.durable() && !s.share && (!includeDurableQoS0 || min(s.qos, packet.Qos) > 0) {
 			return true, nil
 		}
 		if !ok || current.isDisconnected() {

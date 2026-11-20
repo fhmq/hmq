@@ -49,6 +49,10 @@ func main() {
 	check(err)
 	for i, id := range []string{"single", "a", "b", "c"} {
 		cfg := map[string]any{"host": "0.0.0.0", "port": "1883", "httpPort": "8080", "workerNum": 16, "plugins": map[string]string{"auth": "mock", "bridge": "none"}}
+		if id == "single" {
+			cfg["experimentalSessionLogPath"] = "/data/sessions.wal"
+			cfg["retainedLogPath"] = "/data/retained.wal"
+		}
 		if id != "single" {
 			k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 			check(err)
@@ -67,7 +71,7 @@ func main() {
 					seeds = append(seeds, peer+":1993")
 				}
 			}
-			cfg["cluster"] = map[string]any{"nodeID": id, "clusterID": "compose-local", "secret": hex.EncodeToString(secret), "listen": id + ":1993", "seeds": seeds, "tls": map[string]string{"certFile": "/runtime/" + id + ".pem", "keyFile": "/runtime/" + id + ".key", "caFile": "/runtime/ca.pem"}, "quorum": map[string]any{"enabled": true, "dataDir": "/data/quorum", "listen": id + ":2993", "peers": map[string]string{"a": "a:2993", "b": "b:2993", "c": "c:2993"}}}
+			cfg["cluster"] = map[string]any{"nodeID": id, "clusterID": "compose-local", "secret": hex.EncodeToString(secret), "listen": id + ":1993", "seeds": seeds, "tls": map[string]string{"certFile": "/runtime/" + id + ".pem", "keyFile": "/runtime/" + id + ".key", "caFile": "/runtime/ca.pem"}, "quorum": map[string]any{"enabled": true, "sessionPersistence": true, "dataDir": "/data/quorum", "listen": id + ":2993", "peers": map[string]string{"a": "a:2993", "b": "b:2993", "c": "c:2993"}}}
 		}
 		data, err := json.MarshalIndent(cfg, "", "  ")
 		check(err)

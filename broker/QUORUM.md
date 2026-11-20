@@ -35,16 +35,28 @@ or partial fanout can repeat delivery to some/all subscribers. There is no MQTT
 retry deduplication across connections or lost PUBACKs; retries can append another
 entry. A timeout or leadership loss is an uncertain outcome, not proof of abort.
 
-Only clean, online sessions and ordinary QoS 0/1 subscriptions are supported.
+Without replicated sessions, only clean online sessions and ordinary QoS 0/1
+subscriptions are supported.
 Entries consumed with no subscribers are checkpointed. Subscriptions and outbound
 inflight state are in memory and are lost on restart; clients must reconnect and
 resubscribe. This is durable publication acceptance, not an offline subscriber
 queue or exactly-once MQTT implementation. The committed log and local cursor must
 be backed up/restored as one node's state, never independently reset or mixed.
 
-QoS 2, retained messages/storage, shared subscriptions, will messages, non-clean
-sessions, session logs, bridge plugins, directed delivery, reserved `$` publication
-topics and legacy cluster publication frames are rejected. The old direct-cluster
+With `sessionPersistence`, the same ordered journal carries session commands.
+The materialized view is rebuilt from committed entries and does not depend on
+the transient delivery cursor. A successful inbound PUBREC follows the commit of
+the original message; PUBCOMP follows the commit that removes it and enqueues
+durable subscriber deliveries. Outbound PUBLISH/PUBREL phase and Packet ID are
+recovered on a new node. A new CONNECT changes the epoch, so a stale owner
+cannot mutate the replacement session. A clean session is not resumable.
+Durable session storage is still experimental: journal entries count toward
+partition capacity, and there is no history reclamation or durable backlog
+quota. Transient routing remains subject to cursor replay.
+
+Retained messages/storage, shared subscriptions, will messages, standalone
+session logs, bridge plugins, directed delivery, reserved `$` publication topics
+and legacy cluster publication frames are rejected. The old direct-cluster
 connection carries authenticated quorum forwarding, never legacy publications.
 See [forwarding protocol](QUORUM_FORWARDING.md).
 Default best-effort and reliable modes are unchanged when quorum is disabled.

@@ -409,6 +409,10 @@ func ProcessMessage(msg *Message) {
 			return
 		}
 	case *packets.PubrelPacket:
+		if c.durable() || c.broker.quorumEnabled() && c.durableEpoch != 0 {
+			closeAfterRoute = c.releaseDurableQoS2(ca.MessageID) != nil
+			return
+		}
 		if c.broker.quorumEnabled() {
 			closeAfterRoute = true
 			return
@@ -461,6 +465,12 @@ func ProcessMessage(msg *Message) {
 		c.ProcessPing()
 	case *packets.PingrespPacket:
 	case *packets.DisconnectPacket:
+		if c.durable() && msg.mqtt5 != nil {
+			d := msg.mqtt5.Content.(*mqtt5.Disconnect)
+			if expiry := d.Properties.SessionExpiryInterval; expiry != nil && *expiry == 0 {
+				c.deleteDurableSession()
+			}
+		}
 		c.Close()
 	default:
 		log.Info("Recv Unknow message.......", zap.String("ClientID", c.info.clientID))
@@ -476,10 +486,6 @@ func (c *client) processClientPublish(packet *packets.PublishPacket) {
 		c.processQuorumPublish(packet)
 		return
 	}
-	if c.broker.sessionLog != nil && c.typ == CLIENT && packet.Qos == QosExactlyOnce {
-		c.Close()
-		return
-	}
 	c.publishMu.Lock()
 	defer c.publishMu.Unlock()
 
@@ -493,6 +499,12 @@ func (c *client) processClientPublish(packet *packets.PublishPacket) {
 			} else if packet.Qos == 2 {
 				_ = c.WriterPacket(&mqtt5WirePacket{wire: &mqtt5.Pubrec{PacketID: packet.MessageID, ReasonCode: 0x87, Properties: &mqtt5.Properties{}}})
 			}
+		}
+		return
+	}
+	if packet.Qos == QosExactlyOnce && c.durable() {
+		if err := c.receiveDurableQoS2(packet); err != nil {
+			c.Close()
 		}
 		return
 	}
@@ -640,7 +652,14 @@ func (c *client) processClientSubscribeOptions(packet *packets.SubscribePacket, 
 
 	for i, topic := range subTopics {
 		t := topic
-		if (c.durable() || b.quorumEnabled()) && strings.HasPrefix(topic, "$share/") || (b.quorumEnabled() && qoss[i] > 1) {
+		if c.durable() && options != nil {
+			opt := options.Subscriptions[i]
+			if opt.NoLocal || opt.RetainAsPublished || opt.RetainHandling != 0 || options.Properties.SubscriptionIdentifier != nil {
+				retcodes = append(retcodes, QosFailure)
+				continue
+			}
+		}
+		if (c.durable() || b.quorumEnabled()) && strings.HasPrefix(topic, "$share/") || (b.quorumEnabled() && b.sessionLog == nil && qoss[i] > 1) {
 			retcodes = append(retcodes, QosFailure)
 			continue
 		}

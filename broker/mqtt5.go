@@ -11,6 +11,7 @@ import (
 
 	mqtt5 "github.com/eclipse/paho.golang/packets"
 	"github.com/fhmq/hmq/v4/broker/packets"
+	"github.com/fhmq/hmq/v4/broker/sessionstore"
 	"github.com/google/uuid"
 )
 
@@ -20,6 +21,8 @@ type mqtt5State struct {
 	receiveMaximum uint16
 	aliases        map[uint16]string // Read-loop owned; reset for every connection.
 	assignedID     string
+	durableSession bool
+	sessionPresent bool
 	// Publication queue is guarded by outboundSendMu, not the socket write lock.
 	queued      []*packets.PublishPacket
 	queuedBytes int
@@ -148,6 +151,7 @@ func (b *Broker) writeConnack(conn net.Conn, state *mqtt5State, packet *packets.
 			reason = 0x80
 		}
 	}
+	state.sessionPresent = packet.SessionPresent
 	return b.writeMQTT5Connack(conn, state, reason)
 }
 
@@ -158,10 +162,13 @@ func (b *Broker) writeMQTT5Connack(conn net.Conn, state *mqtt5State, reason byte
 	props := &mqtt5.Properties{}
 	if reason == 0 {
 		props.SessionExpiryInterval = &zero
+		if state.durableSession {
+			props.SessionExpiryInterval = state.connect.Properties.SessionExpiryInterval
+		}
 		props.MaximumPacketSize = &maximum
 		props.TopicAliasMaximum = &aliases
 		props.AssignedClientID = state.assignedID
-		if b.quorumEnabled() || b.sessionLog != nil {
+		if b.quorumEnabled() && b.sessionLog == nil {
 			qos := byte(1)
 			props.MaximumQOS = &qos
 		}
@@ -173,7 +180,7 @@ func (b *Broker) writeMQTT5Connack(conn net.Conn, state *mqtt5State, reason byte
 	}
 	_ = conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
 	defer conn.SetWriteDeadline(time.Time{})
-	return writeMQTT5(conn, state, &mqtt5.Connack{ReasonCode: reason, Properties: props})
+	return writeMQTT5(conn, state, &mqtt5.Connack{ReasonCode: reason, SessionPresent: reason == 0 && state.sessionPresent, Properties: props})
 }
 
 func publicationMetadata(p *mqtt5.Properties, origin string) *packets.PublishMetadata {
@@ -223,7 +230,7 @@ func (c *client) readClientPacket(r io.Reader) (packets.ControlPacket, *mqtt5.Co
 		if !validPublishTopic(v.Topic) {
 			return nil, nil, &mqtt5Error{0x90, "empty or unknown aliased topic"}
 		}
-		if c.broker.quorumEnabled() && (v.QoS > 1 || v.Retain) || c.broker.sessionLog != nil && v.QoS > 1 {
+		if c.broker.quorumEnabled() && (v.Retain || v.QoS > 1 && c.broker.sessionLog == nil) {
 			return nil, nil, &mqtt5Error{0x9b, "publication exceeds negotiated capabilities"}
 		}
 		if v.Properties.PayloadFormat != nil && *v.Properties.PayloadFormat == 1 && !utf8.Valid(v.Payload) {
@@ -264,8 +271,9 @@ func (c *client) readClientPacket(r io.Reader) (packets.ControlPacket, *mqtt5.Co
 	case *mqtt5.Pingreq:
 		result = packets.NewControlPacket(packets.Pingreq)
 	case *mqtt5.Disconnect:
-		if v.Properties.SessionExpiryInterval != nil && *v.Properties.SessionExpiryInterval != 0 {
-			return nil, nil, &mqtt5Error{0x82, "cannot increase zero session expiry"}
+		if v.Properties.SessionExpiryInterval != nil && *v.Properties.SessionExpiryInterval != 0 &&
+			(!c.mqtt5.durableSession || *v.Properties.SessionExpiryInterval != ^uint32(0)) {
+			return nil, nil, &mqtt5Error{0x82, "unsupported session expiry override"}
 		}
 		result = packets.NewControlPacket(packets.Disconnect)
 	default:
@@ -340,18 +348,43 @@ func (c *client) processMQTT5NegativeAck(p *mqtt5.ControlPacket) bool {
 	if !ok || v.ReasonCode < 0x80 {
 		return false
 	}
+	if c.durable() {
+		unlock := c.broker.lockClientConnect(c.info.clientID)
+		if owner, _ := c.broker.clients.Load(c.info.clientID); owner != c {
+			unlock()
+			return true
+		}
+		err := c.removeNegativePubrec(v.PacketID)
+		unlock()
+		if err != nil || c.pumpSessionQueue() != nil {
+			c.Close()
+		}
+		return true
+	}
+	_ = c.removeNegativePubrec(v.PacketID)
+	c.pumpMQTT5Queue()
+	return true
+}
+
+func (c *client) removeNegativePubrec(id uint16) error {
 	c.outboundSendMu.Lock()
 	c.inflightMu.Lock()
-	if entry, ok := c.inflight[v.PacketID]; ok && entry.packet.Qos == 2 && entry.status == Publish {
-		delete(c.inflight, v.PacketID)
+	if entry, ok := c.inflight[id]; ok && entry.packet.Qos == 2 && entry.status == Publish {
+		if c.durable() {
+			if err := c.broker.applySession(c.info.clientID, sessionstore.Batch{ExpectedEpoch: &c.durableEpoch, Acks: []sessionstore.Ack{{PacketID: id, Type: "PUBREC_REJECT"}}}); err != nil {
+				c.inflightMu.Unlock()
+				c.outboundSendMu.Unlock()
+				return err
+			}
+		}
+		delete(c.inflight, id)
 		if c.session != nil {
-			c.session.UpdateOutbound(c.outboundOwner, v.PacketID, nil)
+			c.session.UpdateOutbound(c.outboundOwner, id, nil)
 		}
 	}
 	c.inflightMu.Unlock()
 	c.outboundSendMu.Unlock()
-	c.pumpMQTT5Queue()
-	return true
+	return nil
 }
 
 func publicationSize(p *packets.PublishPacket) int {

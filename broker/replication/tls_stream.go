@@ -23,6 +23,7 @@ import (
 
 type TLSStreamConfig struct {
 	ID, ClusterID, Listen string
+	Application           string
 	Peers                 map[string]string
 	ServerTLS, ClientTLS  *tls.Config
 	Timeout               time.Duration
@@ -136,7 +137,11 @@ func ListenTLS(c TLSStreamConfig) (*TLSStream, error) {
 			return nil, err
 		}
 	}
-	s := &TLSStream{listener: l, address: streamAddress(address), server: server, client: client, ids: ids, timeout: c.Timeout, hello: streamHello{Version: 1, ID: c.ID, Cluster: c.ClusterID, Membership: hex.EncodeToString(digest[:]), Protocol: "hmq-raft/1"}, done: make(chan struct{}), ready: make(chan net.Conn), handshakes: make(map[net.Conn]struct{})}
+	protocol := "hmq-raft/1"
+	if c.Application != "" {
+		protocol += "/" + c.Application
+	}
+	s := &TLSStream{listener: l, address: streamAddress(address), server: server, client: client, ids: ids, timeout: c.Timeout, hello: streamHello{Version: 1, ID: c.ID, Cluster: c.ClusterID, Membership: hex.EncodeToString(digest[:]), Protocol: protocol}, done: make(chan struct{}), ready: make(chan net.Conn), handshakes: make(map[net.Conn]struct{})}
 	s.active = make(map[net.Conn]struct{})
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.wg.Add(1)
@@ -309,7 +314,7 @@ func (s *TLSStream) authenticate(conn *tls.Conn, expected string, outgoing bool,
 	if err != nil {
 		return err
 	}
-	if hello.Protocol != "hmq-raft/1" || hello.Version != 1 || hello.ID != id || hello.Cluster != s.hello.Cluster || hello.Membership != s.hello.Membership {
+	if hello.Protocol != s.hello.Protocol || hello.Version != 1 || hello.ID != id || hello.Cluster != s.hello.Cluster || hello.Membership != s.hello.Membership {
 		return ErrIdentity
 	}
 	if !outgoing {

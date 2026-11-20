@@ -1,5 +1,25 @@
 # Local container validation
 
+## QoS 2 session persistence
+
+Date: 2026-11-20 (Asia/Shanghai). Source base: `142afdc` plus the QoS 2
+session persistence changes. The same Colima profile below ran an independent
+Compose project, `hmq-qos2-final`, without replacing the original deployment.
+Tested image: `sha256:8483f788e0623b13f078aa306baea47408e79f31672029ef2652332df746fa16`.
+
+With `HMQ_COMPOSE_TEST=1`, the complete race-enabled Compose suite passed in
+33.833 seconds. It covered standalone SIGKILL and restart, publisher recovery
+after leader change c -> a, subscriber PUBREL recovery on c after a full
+cluster restart, and no PUBCOMP with only one member online. MQTT 5 resumed
+on the same broker and across a/b, preserving the message content type and
+subscriber Packet ID. Duplicate PUBLISH and PUBREL produced one delivery.
+The full repository race suite, go vet and git diff --check passed.
+
+The test deployment remains on loopback MQTT ports 11983 / 21983 / 31983 /
+41983 and HTTP ports 18180 / 28180 / 38180 / 48180 for single / a / b / c.
+
+## Original Compose validation
+
 Date: 2026-11-19 (Asia/Shanghai).
 
 ## Environment

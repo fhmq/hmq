@@ -9,7 +9,9 @@ import (
 	"io"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/fhmq/hmq/v4/broker/packets"
@@ -32,9 +34,11 @@ type Message struct {
 // State is the complete state managed by this package, not a complete MQTT session.
 type State struct {
 	Epoch         uint64              `json:"epoch,omitempty"`
+	Transient     bool                `json:"transient,omitempty"`
 	Subscriptions map[string]byte     `json:"subscriptions"`
 	Queue         []Message           `json:"queue"`
 	Inflight      map[uint16]Inflight `json:"inflight,omitempty"`
+	Inbound       map[uint16]Message  `json:"inbound,omitempty"`
 	LastSequence  uint64              `json:"last_sequence,omitempty"`
 }
 
@@ -59,11 +63,13 @@ type Ack struct {
 }
 
 type record struct {
-	Format   int    `json:"format"`
-	Sequence uint64 `json:"sequence"`
-	ClientID string `json:"client_id"`
-	State    *State `json:"state"`
-	Batch    *Batch `json:"batch,omitempty"`
+	Format       int    `json:"format"`
+	Sequence     uint64 `json:"sequence"`
+	ClientID     string `json:"client_id"`
+	State        *State `json:"state"`
+	Batch        *Batch `json:"batch,omitempty"`
+	Release      uint16 `json:"release,omitempty"`
+	SkipDelivery bool   `json:"skip_delivery,omitempty"`
 }
 
 // Batch changes one existing session atomically. Remove first dequeues the
@@ -72,6 +78,7 @@ type Batch struct {
 	ExpectedEpoch       *uint64            `json:"expected_epoch,omitempty"`
 	NextEpoch           *uint64            `json:"next_epoch,omitempty"`
 	Start               map[uint16]Message `json:"start,omitempty"`
+	Receive             map[uint16]Message `json:"receive,omitempty"`
 	SetSubscriptions    map[string]byte    `json:"set_subscriptions,omitempty"`
 	RemoveSubscriptions []string           `json:"remove_subscriptions,omitempty"`
 	Remove              int                `json:"remove,omitempty"`
@@ -93,6 +100,19 @@ type Store struct {
 	entries  map[string]entry // Tombstones retain versions to prevent ABA.
 	closed   bool
 	failed   error
+}
+
+// NewReplica builds a materialized view whose durability is provided by its
+// ordered, replicated command journal, not a separate local WAL.
+func NewReplica() *Store {
+	return &Store{entries: make(map[string]entry)}
+}
+
+func (s *Store) append(data []byte) error {
+	if s.log == nil {
+		return nil
+	}
+	return s.log.Append(data)
 }
 
 // validSurrogates checks JSON string escapes before encoding/json can replace
@@ -162,6 +182,11 @@ func validate(id string, s *State) error {
 			return ErrInvalid
 		}
 	}
+	for id, m := range s.Inbound {
+		if id == 0 || m.QoS != 2 || m.Topic == "" || !utf8.ValidString(m.Topic) {
+			return ErrInvalid
+		}
+	}
 	seen := make(map[uint64]bool, len(s.Inflight))
 	for id, item := range s.Inflight {
 		if id == 0 || validate("x", &State{Queue: []Message{item.Message}}) != nil ||
@@ -190,7 +215,23 @@ func applyBatch(id string, state *State, b *Batch, legacy bool) (*State, error) 
 			return nil, ErrInvalid
 		}
 	}
-	next := &State{LastSequence: state.LastSequence, Epoch: state.Epoch}
+	next := &State{LastSequence: state.LastSequence, Epoch: state.Epoch, Transient: state.Transient}
+	next.Inbound = state.Inbound
+	if len(b.Receive) > 0 {
+		if err := validate(id, &State{Inbound: b.Receive}); err != nil {
+			return nil, err
+		}
+		next.Inbound = make(map[uint16]Message, len(state.Inbound)+len(b.Receive))
+		for id, message := range state.Inbound {
+			next.Inbound[id] = message
+		}
+		for id, message := range b.Receive {
+			if _, exists := next.Inbound[id]; exists {
+				return nil, ErrConflict
+			}
+			next.Inbound[id] = copyMessage(message)
+		}
+	}
 	if b.NextEpoch != nil {
 		if *b.NextEpoch <= state.Epoch {
 			return nil, ErrInvalid
@@ -219,6 +260,8 @@ func applyBatch(id string, state *State, b *Batch, legacy bool) (*State, error) 
 		case ack.Type == "PUBREC" && item.Message.QoS == 2 && item.Phase == Publish:
 			item.Phase = PubRel
 			next.Inflight[ack.PacketID] = item
+		case ack.Type == "PUBREC_REJECT" && item.Message.QoS == 2 && item.Phase == Publish:
+			delete(next.Inflight, ack.PacketID)
 		case ack.Type == "PUBCOMP" && item.Message.QoS == 2 && item.Phase == PubRel:
 			delete(next.Inflight, ack.PacketID)
 		default:
@@ -287,7 +330,13 @@ func clone(s *State) *State {
 	if s == nil {
 		return nil
 	}
-	c := &State{LastSequence: s.LastSequence, Epoch: s.Epoch}
+	c := &State{LastSequence: s.LastSequence, Epoch: s.Epoch, Transient: s.Transient}
+	if s.Inbound != nil {
+		c.Inbound = make(map[uint16]Message, len(s.Inbound))
+		for id, message := range s.Inbound {
+			c.Inbound[id] = copyMessage(message)
+		}
+	}
 	if s.Subscriptions != nil {
 		c.Subscriptions = make(map[string]byte, len(s.Subscriptions))
 		for k, v := range s.Subscriptions {
@@ -311,6 +360,82 @@ func clone(s *State) *State {
 		}
 	}
 	return c
+}
+
+func copyMessage(m Message) Message {
+	m.Payload = bytes.Clone(m.Payload)
+	m.Metadata = packets.CloneMetadata(m.Metadata)
+	return m
+}
+
+func matchFilter(filter, topic string) bool {
+	if strings.HasPrefix(filter, "$share/") || (strings.HasPrefix(topic, "$") && !strings.HasPrefix(filter, "$")) {
+		return false
+	}
+	for {
+		f, frest, fmore := strings.Cut(filter, "/")
+		t, trest, tmore := strings.Cut(topic, "/")
+		if f == "#" {
+			return !fmore
+		}
+		if f != "+" && f != t {
+			return false
+		}
+		if !tmore {
+			return !fmore || frest == "#"
+		}
+		if !fmore {
+			return false
+		}
+		filter, topic = frest, trest
+	}
+}
+
+// applyRelease removes the publisher's pending packet and enqueues subscriber
+// deliveries from one record. Replay evaluates it against the same session state.
+func (s *Store) applyRelease(id string, packetID uint16, version uint64, skipDelivery bool) {
+	source := s.entries[id].state
+	message := source.Inbound[packetID]
+	s.applyFanout(id, packetID, message, version, skipDelivery)
+}
+
+// FanoutReplica applies an ordinary committed publication to replicated queues.
+func (s *Store) FanoutReplica(message Message) {
+	if message.QoS == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.applyFanout("", 0, message, s.sequence+1, false)
+}
+
+func (s *Store) applyFanout(id string, packetID uint16, message Message, version uint64, skipDelivery bool) {
+	for target, e := range s.entries {
+		if e.state == nil {
+			continue
+		}
+		next := *e.state
+		if target == id {
+			delete(next.Inbound, packetID)
+		}
+		var qos byte
+		if !skipDelivery {
+			for filter, q := range next.Subscriptions {
+				if q > qos && matchFilter(filter, message.Topic) {
+					qos = min(q, message.QoS)
+				}
+			}
+		}
+		if qos > 0 {
+			delivery := message
+			delivery.QoS, delivery.Retain = qos, false
+			next.Queue = append(next.Queue, delivery)
+		}
+		if target == id || qos > 0 {
+			s.entries[target] = entry{version, &next}
+		}
+	}
+	s.sequence = version
 }
 
 // messageReadBytes preserves payload-only budgets for legacy messages while
@@ -552,6 +677,20 @@ func Open(path string) (*Store, error) {
 		if r.Sequence == 0 || r.Sequence != s.sequence+1 || r.ClientID == "" || !utf8.ValidString(r.ClientID) {
 			return ErrCorrupt
 		}
+		if r.Format == 5 {
+			e := s.entries[r.ClientID]
+			if r.State != nil || r.Batch != nil || e.state == nil || r.Release == 0 {
+				return ErrCorrupt
+			}
+			if _, ok := e.state.Inbound[r.Release]; !ok {
+				return ErrCorrupt
+			}
+			s.applyRelease(r.ClientID, r.Release, r.Sequence, r.SkipDelivery)
+			return nil
+		}
+		if r.Release != 0 || r.SkipDelivery {
+			return ErrCorrupt
+		}
 		if r.Format == 1 || r.Format == 3 {
 			if r.Batch != nil {
 				return ErrCorrupt
@@ -615,6 +754,21 @@ func (s *Store) Get(id string) (*State, uint64, error) {
 	return clone(e.state), e.version, nil
 }
 
+func (s *Store) Epoch(id string) (uint64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return 0, storage.ErrClosed
+	}
+	if s.failed != nil {
+		return 0, s.failed
+	}
+	if e := s.entries[id]; e.state != nil {
+		return e.state.Epoch, nil
+	}
+	return 0, nil
+}
+
 // Inspect returns CAS metadata and one inflight entry without copying the backlog.
 func (s *Store) Inspect(id string, packetID uint16) (uint64, bool, Inflight, bool, error) {
 	s.mu.Lock()
@@ -667,7 +821,7 @@ func (s *Store) Put(id string, expected uint64, state *State) (uint64, error) {
 	if len(data) > storage.MaxRecordSize {
 		return 0, storage.ErrTooLarge
 	}
-	if err = s.log.Append(data); err != nil {
+	if err = s.append(data); err != nil {
 		s.failed = err
 		return 0, err
 	}
@@ -682,6 +836,10 @@ func (s *Store) Put(id string, expected uint64, state *State) (uint64, error) {
 func (s *Store) Apply(id string, expected uint64, batch Batch) (uint64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.apply(id, expected, batch)
+}
+
+func (s *Store) apply(id string, expected uint64, batch Batch) (uint64, error) {
 	if s.closed {
 		return 0, storage.ErrClosed
 	}
@@ -709,7 +867,7 @@ func (s *Store) Apply(id string, expected uint64, batch Batch) (uint64, error) {
 	if len(data) > storage.MaxRecordSize {
 		return 0, storage.ErrTooLarge
 	}
-	if err = s.log.Append(data); err != nil {
+	if err = s.append(data); err != nil {
 		s.failed = err
 		return 0, err
 	}
@@ -725,5 +883,75 @@ func (s *Store) Close() error {
 		return storage.ErrClosed
 	}
 	s.closed = true
+	if s.log == nil {
+		return nil
+	}
 	return s.log.Close()
+}
+
+// Receive records the first PUBLISH for this ID before PUBREC. Retries do not
+// replace the original payload, even if the client sends a different payload.
+func (s *Store) Receive(id string, epoch uint64, packetID uint16, message Message, maximum int) error {
+	if packetID == 0 {
+		return ErrInvalid
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return storage.ErrClosed
+	}
+	if s.failed != nil {
+		return s.failed
+	}
+	e := s.entries[id]
+	state := e.state
+	if state == nil || state.Epoch != epoch {
+		return ErrConflict
+	}
+	if _, ok := state.Inbound[packetID]; ok {
+		return nil
+	}
+	if maximum > 0 && len(state.Inbound) >= maximum {
+		return ErrInvalid
+	}
+	_, err := s.apply(id, e.version, Batch{ExpectedEpoch: &epoch, Receive: map[uint16]Message{packetID: message}})
+	return err
+}
+
+// Release commits the transition and durable fanout before PUBCOMP.
+func (s *Store) Release(id string, epoch uint64, packetID uint16, now time.Time) (Message, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return Message{}, false, storage.ErrClosed
+	}
+	if s.failed != nil {
+		return Message{}, false, s.failed
+	}
+	e := s.entries[id]
+	if e.state == nil || e.state.Epoch != epoch {
+		return Message{}, false, ErrConflict
+	}
+	message, found := e.state.Inbound[packetID]
+	if !found {
+		return Message{}, false, nil
+	}
+	expired := message.Metadata != nil && !message.Metadata.ExpiresAt.IsZero() && !now.Before(message.Metadata.ExpiresAt)
+	r := record{Format: 5, Sequence: s.sequence + 1, ClientID: id, Release: packetID, SkipDelivery: expired}
+	if r.Sequence == 0 {
+		return Message{}, false, ErrInvalid
+	}
+	data, err := json.Marshal(r)
+	if err != nil {
+		return Message{}, false, err
+	}
+	if err = s.append(data); err != nil {
+		s.failed = err
+		return Message{}, false, err
+	}
+	s.applyRelease(id, packetID, r.Sequence, expired)
+	if expired {
+		return Message{}, true, nil
+	}
+	return copyMessage(message), true, nil
 }

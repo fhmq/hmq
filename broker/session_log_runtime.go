@@ -69,6 +69,9 @@ func (b *Broker) initSessionIndex() error {
 }
 func (b *Broker) indexFilter(id, filter string, qos *byte) error {
 	i := b.sessionIndex
+	if i == nil {
+		return nil
+	}
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	if old := i.filters[id][filter]; old != nil {
@@ -95,6 +98,9 @@ func (b *Broker) indexFilter(id, filter string, qos *byte) error {
 }
 func (b *Broker) deleteSessionIndex(id string) {
 	i := b.sessionIndex
+	if i == nil {
+		return
+	}
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	for f, s := range i.filters[id] {
@@ -307,7 +313,7 @@ func (c *client) loadSessionLog() error {
 }
 
 // The caller holds the client-ID lock through commit, CONNACK, and owner claim.
-func (c *client) prepareSessionLog(clean bool) (func() error, error) {
+func (c *client) prepareSessionLog(clean, reset bool) (func() error, error) {
 	b := c.broker
 	id := c.info.clientID
 	s, v, err := b.sessionLog.Get(id)
@@ -315,10 +321,17 @@ func (c *client) prepareSessionLog(clean bool) (func() error, error) {
 		return nil, err
 	}
 	saved := s
+	lastWrite := uint64(0)
 	rollback := func() error {
+		if b.quorumEnabled() {
+			return nil // Never undo a committed cluster ownership change.
+		}
 		current, version, err := b.sessionLog.Get(id)
 		if err != nil {
 			return err
+		}
+		if lastWrite == 0 || version != lastWrite {
+			return nil
 		}
 		if saved != nil && current != nil && saved.LastSequence < current.LastSequence {
 			saved.LastSequence = current.LastSequence
@@ -327,14 +340,35 @@ func (c *client) prepareSessionLog(clean bool) (func() error, error) {
 		return err
 	}
 	if clean {
-		_, err = b.sessionLog.Put(id, v, nil)
+		if b.quorumEnabled() {
+			epoch := v + 1
+			if epoch == 0 {
+				return nil, sessionstore.ErrInvalid
+			}
+			next := &sessionstore.State{Epoch: epoch, Transient: true}
+			if s != nil {
+				next.LastSequence = s.LastSequence
+			}
+			_, err = b.sessionLog.Put(id, v, next)
+			if err == nil {
+				c.durableEpoch = epoch
+			}
+			return nil, err
+		}
+		if s == nil {
+			return nil, nil
+		}
+		lastWrite, err = b.sessionLog.Put(id, v, nil)
 		return rollback, err
 	}
 	epoch := v + 1 // Tombstone versions prevent epoch reuse after clean deletion.
 	if epoch == 0 {
 		return nil, sessionstore.ErrInvalid
 	}
-	if s == nil {
+	if s != nil && (reset || s.Transient) {
+		s = &sessionstore.State{Epoch: epoch, LastSequence: s.LastSequence}
+		v, err = b.sessionLog.Put(id, v, s)
+	} else if s == nil {
 		s = &sessionstore.State{Epoch: epoch}
 		v, err = b.sessionLog.Put(id, v, s)
 	} else {
@@ -350,6 +384,7 @@ func (c *client) prepareSessionLog(clean bool) (func() error, error) {
 	if err != nil {
 		return rollback, err
 	}
+	lastWrite = v
 	if c.durableEpoch == 0 {
 		c.durableEpoch = s.Epoch
 	}
@@ -363,12 +398,19 @@ func (c *client) prepareSessionLog(clean bool) (func() error, error) {
 		used[id] = true
 	}
 	remaining := b.durableWindow() - len(s.Inflight)
+	if c.mqtt5 != nil {
+		remaining = min(remaining, int(c.mqtt5.receiveMaximum)-len(s.Inflight))
+		if remaining < 0 {
+			return rollback, errors.New("receive maximum is below saved inflight count")
+		}
+	}
 	for _, message := range s.Queue {
 		if metadata := message.Metadata; metadata != nil && !metadata.ExpiresAt.IsZero() && !time.Now().Before(metadata.ExpiresAt) {
 			v, err = b.sessionLog.Apply(c.info.clientID, v, sessionstore.Batch{Remove: 1, ExpectedEpoch: &c.durableEpoch})
 			if err != nil {
 				return rollback, err
 			}
+			lastWrite = v
 			continue
 		}
 		if remaining <= 0 {
@@ -390,6 +432,7 @@ func (c *client) prepareSessionLog(clean bool) (func() error, error) {
 		if err != nil {
 			return rollback, err
 		}
+		lastWrite = v
 	}
 	return rollback, nil
 }
@@ -457,7 +500,11 @@ func (c *client) pumpSessionQueueLocked() error {
 			}
 			continue
 		}
-		if len(c.inflight) >= c.broker.durableWindow() {
+		window := c.broker.durableWindow()
+		if c.mqtt5 != nil {
+			window = min(window, int(c.mqtt5.receiveMaximum))
+		}
+		if len(c.inflight) >= window {
 			c.inflightMu.Unlock()
 			c.stateMu.Unlock()
 			return nil

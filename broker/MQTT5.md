@@ -42,26 +42,25 @@ properties and expiry metadata; MQTT 3 packet wire behavior remains unchanged.
 This is a deliberately bounded profile, not a claim of complete MQTT 5 feature
 conformance:
 
-- Session Expiry is explicitly negotiated to **zero** in CONNACK and Session
-  Present is false. Clean Start is not incorrectly reused as Clean Session.
-  MQTT 5 subscriptions, queues and in-flight state do not survive disconnect.
-  The standalone persistent-session feature continues to serve MQTT 3.x clients;
-  it does not provide durable MQTT 5 session resumption.
+- With a session backend, MQTT 5 supports non-expiring sessions when CONNECT
+  requests `SessionExpiryInterval=0xFFFFFFFF`. Clean Start resets the saved
+  state; otherwise the broker resumes it and reports Session Present. Finite
+  expiry timers are not implemented and finite requests negotiate zero.
+  Persistent MQTT 5 subscriptions support basic topic filters and QoS only.
   A Clean Start=false connection that finds an existing active or saved session
   is refused with CONNACK `0x83`, preserving that session instead of silently
   deleting it. Clean Start=false is accepted when there is no existing state.
-- Since the negotiated session expires immediately, a delayed Will cannot outlive
-  it: Will publication occurs when that session ends. A nonzero DISCONNECT Session
-  Expiry is rejected rather than silently changing this negotiated lifetime.
+- A delayed Will cannot outlive a zero-expiry session. Delayed Will scheduling
+  for persistent sessions is not implemented. DISCONNECT can request deletion
+  of a non-expiring session with a zero expiry override.
 - Enhanced AUTH is unavailable. CONNECT requesting an authentication method gets
   CONNACK `0x8C`; username/password authentication remains available.
 - The server admits packets up to **1 MiB**, including fixed header, and advertises
   this maximum in MQTT 5 CONNACK. The initial CONNECT is bounded for all versions.
 - There are no same-connection timer retransmissions for MQTT 5. Its QoS exchanges
   progress by acknowledgments; MQTT 3 retry behavior is unchanged.
-- Quorum mode retains its existing restrictions and advertises Maximum QoS 1,
-  retained unavailable and shared subscriptions unavailable. Configuring local
-  session storage also advertises Maximum QoS 1 for inbound MQTT 5 publications.
+- Quorum always advertises retained and shared subscriptions unavailable. It
+  advertises Maximum QoS 1 only when replicated sessions are disabled.
 - Existing cluster membership, single-partition replication and crash-fault
   guarantees are unchanged. Expiry timestamps across nodes assume synchronized
   clocks; this implementation is not a clock-skew tolerant expiry protocol.

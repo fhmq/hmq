@@ -17,6 +17,9 @@ Implemented paths:
   and PUBREC phase advancement are saved before the corresponding runtime
   transition or PUBREL write. Experimental ACK handling is fenced by the
   per-client connection lock. Recovery sends entries in saved sequence order.
+- For persistent sessions, inbound QoS2 stores the original PUBLISH before
+  PUBREC. PUBREL completes the exchange and enqueues matching durable deliveries
+  in one WAL record before PUBCOMP. Replaying PUBREL does not enqueue again.
 - Clean CONNECT deletion, persistent session creation/epoch advancement and
   queue-to-inflight conversion commit before successful CONNACK. A failed
   CONNACK write rolls back durable state while preserving the previous owner.
@@ -50,11 +53,10 @@ Explicit exclusions and remaining limitations:
 - Persistent shared subscriptions are rejected with SUBACK failure. Existing
   logs containing shared filters cannot be resumed. Clean shared subscriptions
   retain their previous memory-only behavior.
-- Inbound QoS2 PUBLISH from client connections is rejected by disconnecting,
-  without PUBREC, whenever this option is enabled. Inbound PUBREL state is not
-  persisted. This is not a complete MQTT persistent-session implementation.
-- Fanout is not atomic with publisher ACK, retained updates, or other sessions. No end-to-end
-  exactly-once or crash-atomic fanout guarantee is claimed.
+- The atomic fanout applies to durable subscriber queues on inbound QoS2, not
+  to QoS1, transient subscribers, retained updates, or external side effects.
+  Durable inbound QoS2 does not support bridge plugins. No end-to-end business
+  exactly-once guarantee is claimed.
 - Enqueue, new outbound inflight, ACK, epoch advancement and queue movement use
   incremental Apply records, not backlog snapshots. Individual records must fit
   the log's maximum record size. Queued deliveries need not fit the available
@@ -69,6 +71,13 @@ Verification: `go test ./broker -run TestSessionLogMQTT -count=1` exercises MQTT
 SUBACK, offline publish/PUBACK across broker reopen, recovered QoS1 acknowledgment,
 QoS2 restart before PUBREC, restart after PUBREL, and durable PUBCOMP deletion.
 This is a reopen integration test, not a SIGKILL or power-failure test.
+
+The broker depends on `broker.SessionStorage`, not the WAL implementation.
+`broker.NewBrokerWithSessionStorage` accepts an alternative standalone backend.
+Implementations must provide durable CAS versions (including deleted sessions),
+ownership epochs, ordered queue/inflight reads, idempotent inbound acceptance,
+and an atomic release-plus-fanout. The built-in quorum option is a separate
+replicated backend; a local database cannot replace its consensus log.
 
 `go test ./broker -run TestSessionLogWindowDrainsFIFO -count=1` covers QoS1/2
 with a two-entry window, a larger queued backlog, online tail admission, ID

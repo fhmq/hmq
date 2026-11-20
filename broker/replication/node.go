@@ -21,6 +21,8 @@ type Config struct {
 	Dir       string
 	Transport raft.Transport
 	Bootstrap []raft.Server
+	// Application distinguishes incompatible state-machine profiles.
+	Application string
 	// RaftConfig is copied; LocalID and LogOutput are supplied by this package.
 	RaftConfig *raft.Config
 }
@@ -76,7 +78,10 @@ func Open(config Config) (*Node, error) {
 		return nil, err
 	}
 	identityKey := []byte("hmq/node-identity/v2")
-	expectedIdentity, _ := json.Marshal(struct{ ID, Cluster string }{config.ID, config.ClusterID})
+	expectedIdentity, _ := json.Marshal(struct {
+		ID, Cluster string
+		Application string `json:",omitempty"`
+	}{config.ID, config.ClusterID, config.Application})
 	identity, err := store.Get(identityKey)
 	if err != nil {
 		store.Close()
