@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -29,30 +30,42 @@ func mqtt5Reason(err error) byte {
 
 // Frame admission precedes library decoding, which allocates Remaining Length.
 func readMQTTFrame(r io.Reader, maximum int) ([]byte, error) {
-	var first [1]byte
-	if _, err := io.ReadFull(r, first[:]); err != nil {
+	var prefix [5]byte
+	if _, err := io.ReadFull(r, prefix[:1]); err != nil {
 		return nil, err
 	}
-	frame := []byte{first[0]}
 	length, multiplier := 0, 1
-	for i := 0; i < 4; i++ {
-		if _, err := io.ReadFull(r, first[:]); err != nil {
+	for i := 1; i < len(prefix); i++ {
+		if _, err := io.ReadFull(r, prefix[i:i+1]); err != nil {
 			return nil, err
 		}
-		b := first[0]
-		frame = append(frame, b)
+		b := prefix[i]
 		length += int(b&127) * multiplier
 		if b&128 == 0 {
-			if i > 0 && b == 0 {
+			if i > 1 && b == 0 {
 				return nil, &mqtt5Error{0x81, "noncanonical remaining length"}
 			}
-			if length+len(frame) > maximum {
+			header := i + 1
+			if length+header > maximum {
 				return nil, &mqtt5Error{0x95, "MQTT packet too large"}
 			}
-			header := len(frame)
-			frame = append(frame, make([]byte, length)...)
-			_, err := io.ReadFull(r, frame[header:])
-			return frame, err
+			if length <= 4096 {
+				frame := make([]byte, header+length)
+				copy(frame, prefix[:header])
+				_, err := io.ReadFull(r, frame[header:])
+				return frame, err
+			}
+			// Grow with received bytes, not with the advertised length of
+			// an incomplete packet.
+			var frame bytes.Buffer
+			_, _ = frame.Write(prefix[:header])
+			if _, err := io.CopyN(&frame, r, int64(length)); err != nil {
+				if err == io.EOF {
+					err = io.ErrUnexpectedEOF
+				}
+				return nil, err
+			}
+			return frame.Bytes(), nil
 		}
 		multiplier *= 128
 	}

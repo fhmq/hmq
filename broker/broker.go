@@ -1247,6 +1247,13 @@ func (b *Broker) publishTransientLocal(packet *packets.PublishPacket, includeDur
 			log.Warn("subscription delivery interrupted by takeover", zap.String("ClientID", current.info.clientID), zap.Error(err))
 			return !(errors.Is(err, errWriteNotStarted) || (s.share && errors.Is(err, errWriteZeroBytes))), nil
 		}
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			// A timed-out write may have sent a prefix. Detach the slow
+			// recipient without failing the publisher or retrying fanout.
+			interruptedClient = current
+			return true, nil
+		}
 		if errors.Is(err, net.ErrClosed) && current.isDisconnected() {
 			return !errors.Is(err, errWriteNotStarted), nil
 		}

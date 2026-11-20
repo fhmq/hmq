@@ -55,8 +55,14 @@ conformance:
   of a non-expiring session with a zero expiry override.
 - Enhanced AUTH is unavailable. CONNECT requesting an authentication method gets
   CONNACK `0x8C`; username/password authentication remains available.
-- The server admits packets up to **1 MiB**, including fixed header, and advertises
-  this maximum in MQTT 5 CONNACK. The initial CONNECT is bounded for all versions.
+- The server admits packets up to **1 MiB**, including fixed header, before
+  decoding on MQTT 3.x and MQTT 5 connections, including CONNECT. MQTT 5
+  advertises this limit in CONNACK.
+- Inbound QoS 2 can have up to 128 exchanges awaiting PUBREL per session. The
+  MQTT 5 CONNACK advertises a Receive Maximum of 128. A memory-mode MQTT 3.x
+  subscriber that fills its 128-message outbound QoS window is disconnected;
+  publishers and other sockets can continue. Durable subscribers use the
+  existing persisted queue instead.
 - There are no same-connection timer retransmissions for MQTT 5. Its QoS exchanges
   progress by acknowledgments; MQTT 3 retry behavior is unchanged.
 - Quorum always advertises retained and shared subscriptions unavailable. It

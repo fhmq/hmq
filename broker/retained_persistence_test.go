@@ -8,8 +8,8 @@ import (
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
-	"github.com/fhmq/hmq/v4/broker/packets"
 	"github.com/fhmq/hmq/v4/broker/lib/topics"
+	"github.com/fhmq/hmq/v4/broker/packets"
 	"github.com/fhmq/hmq/v4/broker/storage"
 )
 
@@ -204,8 +204,13 @@ func TestRetainedStorageFailureNoMQTTAck(t *testing.T) {
 			if registered == nil {
 				t.Fatal("client not registered")
 			}
+			// Inject failure at the storage boundary, independently of the
+			// maximum accepted wire packet size.
+			if err := b.topicsMgr.Close(); err != nil {
+				t.Fatal(err)
+			}
 			pub := packets.NewControlPacket(packets.Publish).(*packets.PublishPacket)
-			pub.TopicName, pub.Qos, pub.MessageID, pub.Retain, pub.Payload = "failure/topic", qos, 1, true, make([]byte, storage.MaxRecordSize)
+			pub.TopicName, pub.Qos, pub.MessageID, pub.Retain, pub.Payload = "failure/topic", qos, 1, true, []byte("retained value")
 			if err := pub.Write(conn); err != nil {
 				t.Fatal(err)
 			}
@@ -216,11 +221,9 @@ func TestRetainedStorageFailureNoMQTTAck(t *testing.T) {
 			}
 			if qos == 2 {
 				registered.publishMu.Lock()
-				registered.awaitingRelMu.RLock()
-				_, exists := registered.awaitingRel[pub.MessageID]
-				registered.awaitingRelMu.RUnlock()
+				pending := registered.session.AwaitingRelCount()
 				registered.publishMu.Unlock()
-				if exists {
+				if pending != 0 {
 					t.Fatal("failed publish remains registered as awaiting PUBREL")
 				}
 				retry, err := net.DialTimeout("tcp", addr, time.Second)

@@ -122,7 +122,7 @@ func unWrapPublishPacket(packet *packets.PublishPacket) *packets.PublishPacket {
 var ErrPacketIDExhausted = errors.New("outbound packet IDs exhausted")
 var ErrInvalidDeliveryQoS = errors.New("invalid outbound delivery QoS")
 var errDurableAccepted = errors.New("delivery durably accepted")
-var errSlowConsumer = errors.New("MQTT 5 outbound queue full")
+var errSlowConsumer = errors.New("outbound QoS window or queue full")
 var errMQTT5DeliveryTooLarge = errors.New("MQTT 5 shared delivery exceeds peer maximum")
 
 func publish(sub *subscription, original *packets.PublishPacket, qos byte) error {
@@ -200,6 +200,15 @@ func (c *client) sendPublication(packet *packets.PublishPacket, shared bool, fro
 			return errors.Join(net.ErrClosed, errWriteNotStarted)
 		}
 		c.inflightMu.Lock()
+		if c.mqtt5 == nil && len(c.inflight) >= defaultDurableWindow {
+			exhausted := len(c.inflight) >= maxDurableWindow
+			c.inflightMu.Unlock()
+			c.stateMu.Unlock()
+			if exhausted {
+				return ErrPacketIDExhausted
+			}
+			return errors.Join(errSlowConsumer, errWriteNotStarted)
+		}
 		if c.mqtt5 != nil && (len(c.inflight) >= int(c.mqtt5.receiveMaximum) || !fromQueue && (len(c.mqtt5.queued) > 0 || c.mqtt5.draining)) {
 			c.inflightMu.Unlock()
 			c.stateMu.Unlock()

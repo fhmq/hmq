@@ -55,6 +55,9 @@ func readClientConnect(conn net.Conn) (*packets.ConnectPacket, *mqtt5State, erro
 		return nil, nil, errors.New("first MQTT packet must be CONNECT")
 	}
 	if name != "MQTT" || version != 5 {
+		if err := validateLegacyConnect(frame); err != nil {
+			return nil, nil, err
+		}
 		p, err := packets.ReadPacket(bytes.NewReader(frame))
 		if err != nil {
 			return nil, nil, err
@@ -159,6 +162,7 @@ func (b *Broker) writeMQTT5Connack(conn net.Conn, state *mqtt5State, reason byte
 	zero := uint32(0)
 	maximum := uint32(mqtt5MaximumPacketSize)
 	aliases := uint16(mqtt5TopicAliasMaximum)
+	receive := uint16(inboundQoS2Window)
 	props := &mqtt5.Properties{}
 	if reason == 0 {
 		props.SessionExpiryInterval = &zero
@@ -167,6 +171,7 @@ func (b *Broker) writeMQTT5Connack(conn net.Conn, state *mqtt5State, reason byte
 		}
 		props.MaximumPacketSize = &maximum
 		props.TopicAliasMaximum = &aliases
+		props.ReceiveMaximum = &receive
 		props.AssignedClientID = state.assignedID
 		if b.quorumEnabled() && b.sessionLog == nil {
 			qos := byte(1)
@@ -199,16 +204,16 @@ func publicationMetadata(p *mqtt5.Properties, origin string) *packets.PublishMet
 }
 
 func (c *client) readClientPacket(r io.Reader) (packets.ControlPacket, *mqtt5.ControlPacket, error) {
+	frame, err := readMQTTFrame(r, mqtt5MaximumPacketSize)
+	if err != nil {
+		return nil, nil, err
+	}
 	if c.mqtt5 == nil {
-		p, err := packets.ReadPacket(r)
+		p, err := decodeLegacyClientPacket(frame)
 		if publish, ok := p.(*packets.PublishPacket); ok {
 			publish.Metadata = &packets.PublishMetadata{Origin: c.info.clientID}
 		}
 		return p, nil, err
-	}
-	frame, err := readMQTTFrame(r, mqtt5MaximumPacketSize)
-	if err != nil {
-		return nil, nil, err
 	}
 	if err = validateMQTT5Frame(frame); err != nil {
 		return nil, nil, err

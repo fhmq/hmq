@@ -7,7 +7,6 @@ import (
 	"io"
 	"net"
 	"os"
-	"reflect"
 	"regexp"
 	"strings"
 	"sync"
@@ -39,8 +38,9 @@ const (
 )
 
 const (
-	awaitRelTimeout int64 = 20
-	retryInterval   int64 = 20
+	awaitRelTimeout   int64 = 20
+	retryInterval     int64 = 20
+	inboundQoS2Window       = 128
 )
 
 var groupCompile = regexp.MustCompile(_GroupTopicRegexp)
@@ -149,6 +149,7 @@ func (c *client) init() {
 	c.subMap = make(map[string]*subscription)
 	c.topicsMgr = c.broker.topicsMgr
 	c.awaitingRel = make(map[uint16]int64)
+	c.maxAwaitingRel = inboundQoS2Window
 	c.inflight = make(map[uint16]*inflightElem)
 	c.mqueue = queue.New()
 }
@@ -157,10 +158,10 @@ func (c *client) readLoop() {
 	c.mu.Lock()
 	nc := c.conn
 	c.mu.Unlock()
-	b := c.broker
-	if nc == nil || b == nil {
+	if nc == nil || c.broker == nil {
 		return
 	}
+	defer c.Close()
 
 	keepAlive := time.Second * time.Duration(c.info.keepalive)
 	timeOut := keepAlive + (keepAlive / 2)
@@ -174,11 +175,6 @@ func (c *client) readLoop() {
 			if keepAlive > 0 {
 				if err := nc.SetReadDeadline(time.Now().Add(timeOut)); err != nil {
 					log.Error("set read timeout error: ", zap.Error(err), zap.String("ClientID", c.info.clientID))
-					msg := &Message{
-						client: c,
-						packet: DisconnectedPacket,
-					}
-					b.SubmitWork(c.info.clientID, msg)
 					return
 				}
 			}
@@ -196,11 +192,6 @@ func (c *client) readLoop() {
 					}
 				}
 				log.Error("read packet error: ", zap.Error(err), zap.String("ClientID", c.info.clientID))
-				msg := &Message{
-					client: c,
-					packet: DisconnectedPacket,
-				}
-				b.SubmitWork(c.info.clientID, msg)
 				return
 			}
 
@@ -223,7 +214,9 @@ func (c *client) readLoop() {
 				packet: packet,
 				mqtt5:  v5,
 			}
-			b.SubmitWork(c.info.clientID, msg)
+			// One reader already provides per-connection ordering. Do not
+			// enqueue decoded packets or share a worker with other sockets.
+			ProcessMessage(msg)
 		}
 	}
 }
@@ -281,7 +274,13 @@ func validatePacketFields(msgPacket packets.ControlPacket) (validFields bool) {
 }
 
 func ProcessMessage(msg *Message) {
+	if msg == nil || msg.client == nil || msg.packet == nil {
+		return
+	}
 	c := msg.client
+	if c.isDisconnected() {
+		return
+	}
 	closeAfterRoute := false
 	defer func() {
 		if closeAfterRoute {
@@ -289,9 +288,6 @@ func ProcessMessage(msg *Message) {
 		}
 	}()
 	ca := msg.packet
-	if ca == nil {
-		return
-	}
 	if msg.mqtt5 != nil && c.processMQTT5NegativeAck(msg.mqtt5) {
 		return
 	}
@@ -308,7 +304,9 @@ func ProcessMessage(msg *Message) {
 	}
 
 	if c.typ == CLIENT {
-		log.Debug("Recv message:", zap.String("message type", reflect.TypeOf(msg.packet).String()[9:]), zap.String("ClientID", c.info.clientID))
+		if entry := log.Check(zap.DebugLevel, "Received packet"); entry != nil {
+			entry.Write(zap.String("message type", fmt.Sprintf("%T", ca)), zap.String("clientID", c.info.clientID))
+		}
 	}
 
 	// Perform field validation
@@ -320,18 +318,8 @@ func ProcessMessage(msg *Message) {
 		// If a Server or Client receives a Control Packet
 		// containing ill-formed UTF-8 it MUST close the Network Connection
 
-		c.mu.Lock()
-		conn := c.conn
-		c.mu.Unlock()
-		if conn != nil {
-			_ = conn.Close()
-		}
-
-		// Update client status
-		// c.status = Disconnected
-
 		log.Error("Client disconnected due to malformed packet", zap.String("ClientID", c.info.clientID))
-
+		closeAfterRoute = true
 		return
 	}
 
