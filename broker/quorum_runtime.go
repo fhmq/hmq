@@ -18,6 +18,7 @@ import (
 
 	"github.com/fhmq/hmq/v4/broker/packets"
 	"github.com/fhmq/hmq/v4/broker/replication"
+	"github.com/fhmq/hmq/v4/broker/sessionstore"
 	"github.com/fhmq/hmq/v4/broker/storage"
 	"github.com/hashicorp/raft"
 )
@@ -148,6 +149,10 @@ func openQuorumCursor(dir, id, clusterID string) (*storage.Log, uint64, error) {
 }
 
 func openQuorumRuntime(c RouteInfo, serverTLS, clientTLS *tls.Config) (*quorumRuntime, error) {
+	return openQuorumRuntimeLimited(c, serverTLS, clientTLS, sessionstore.Limits{})
+}
+
+func openQuorumRuntimeLimited(c RouteInfo, serverTLS, clientTLS *tls.Config, quota sessionstore.Limits) (*quorumRuntime, error) {
 	dir, err := canonicalLogPath(c.Quorum.DataDir)
 	if err != nil {
 		return nil, err
@@ -175,7 +180,11 @@ func openQuorumRuntime(c RouteInfo, serverTLS, clientTLS *tls.Config) (*quorumRu
 	if c.Quorum.SessionPersistence {
 		application = "sessions-v1"
 	}
-	layer, err := replication.ListenTLS(replication.TLSStreamConfig{ID: c.NodeID, ClusterID: c.ClusterID, Listen: c.Quorum.Listen, Peers: c.Quorum.Peers, ServerTLS: serverTLS, ClientTLS: clientTLS, Timeout: 5 * time.Second, Application: application})
+	wireApplication := application
+	if quota.Enabled() {
+		wireApplication = fmt.Sprintf("%s/quota-%d-%d", application, quota.MaxPendingMessages, quota.MaxPendingBytes)
+	}
+	layer, err := replication.ListenTLS(replication.TLSStreamConfig{ID: c.NodeID, ClusterID: c.ClusterID, Listen: c.Quorum.Listen, Peers: c.Quorum.Peers, ServerTLS: serverTLS, ClientTLS: clientTLS, Timeout: 5 * time.Second, Application: wireApplication})
 	if err != nil {
 		return nil, err
 	}
@@ -285,7 +294,17 @@ func (r *quorumRuntime) publish(p *packets.PublishPacket) error {
 		return err
 	}
 	defer r.releaseProposal()
-	data, err := stdjson.Marshal(clusterPublication(p))
+	pub := clusterPublication(p)
+	if r.sessions != nil && p.Qos == 1 {
+		pub.QueuedAt = time.Now().UTC()
+		if r.sessions.limits.Enabled() {
+			_, err := r.sessions.commit(quorumSessionCommand{SessionOp: "publish", Message: &sessionstore.Message{
+				Topic: p.TopicName, Payload: p.Payload, QoS: p.Qos, Metadata: p.Metadata, QueuedAt: pub.QueuedAt,
+			}})
+			return err
+		}
+	}
+	data, err := stdjson.Marshal(pub)
 	if err != nil {
 		return err
 	}
@@ -316,8 +335,11 @@ func (c *client) processQuorumPublish(p *packets.PublishPacket) {
 		check := *p
 		check.Qos = 1
 		if p.MessageID == 0 || !validQuorumPublication(&check) ||
-			!c.broker.CheckTopicAuth(PUB, c.info.clientID, c.info.username, c.info.remoteIP, p.TopicName) ||
-			c.receiveDurableQoS2(p) != nil {
+			!c.broker.CheckTopicAuth(PUB, c.info.clientID, c.info.username, c.info.remoteIP, p.TopicName) {
+			c.Close()
+			return
+		}
+		if err := c.receiveDurableQoS2(p); err != nil && !c.rejectQuota(p, err) {
 			c.Close()
 		}
 		return
@@ -328,7 +350,9 @@ func (c *client) processQuorumPublish(p *packets.PublishPacket) {
 	}
 	// No bridge, retained write or local delivery may precede this commit.
 	if err := c.broker.quorumRuntime.publish(p); err != nil {
-		c.Close()
+		if !c.rejectQuota(p, err) {
+			c.Close()
+		}
 		return
 	}
 	if p.Qos == 1 {

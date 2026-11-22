@@ -48,6 +48,9 @@ func InitHTTPMoniter(b *Broker) {
 
 func monitorRouter(b *Broker) *gin.Engine {
 	router := gin.Default()
+	router.GET("/api/v1/capacity", func(c *gin.Context) {
+		c.JSON(http.StatusOK, b.capacity())
+	})
 	router.GET("api/v1/cluster/quorum", func(c *gin.Context) {
 		status := quorumHealth{State: "disabled", Partitions: 1, Routing: "disabled"}
 		if b.quorumRuntime != nil {

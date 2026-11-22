@@ -24,6 +24,7 @@ var ErrCorrupt = errors.New("sessionstore: invalid log record")
 
 // Message is an unsent offline publication. It intentionally has no packet ID.
 type Message struct {
+	QueuedAt time.Time                `json:"queued_at,omitzero"`
 	Retain   bool                     `json:"retain,omitempty"`
 	Topic    string                   `json:"topic"`
 	Payload  []byte                   `json:"payload"`
@@ -63,13 +64,15 @@ type Ack struct {
 }
 
 type record struct {
-	Format       int    `json:"format"`
-	Sequence     uint64 `json:"sequence"`
-	ClientID     string `json:"client_id"`
-	State        *State `json:"state"`
-	Batch        *Batch `json:"batch,omitempty"`
-	Release      uint16 `json:"release,omitempty"`
-	SkipDelivery bool   `json:"skip_delivery,omitempty"`
+	Format       int       `json:"format"`
+	Sequence     uint64    `json:"sequence"`
+	ClientID     string    `json:"client_id"`
+	State        *State    `json:"state"`
+	Batch        *Batch    `json:"batch,omitempty"`
+	Release      uint16    `json:"release,omitempty"`
+	SkipDelivery bool      `json:"skip_delivery,omitempty"`
+	Publication  *Message  `json:"publication,omitempty"`
+	At           time.Time `json:"at,omitzero"`
 }
 
 // Batch changes one existing session atomically. Remove first dequeues the
@@ -91,6 +94,7 @@ type Batch struct {
 type entry struct {
 	version uint64
 	state   *State
+	pending Usage // Derived from committed state; rebuilt on replay.
 }
 
 type Store struct {
@@ -100,6 +104,7 @@ type Store struct {
 	entries  map[string]entry // Tombstones retain versions to prevent ABA.
 	closed   bool
 	failed   error
+	limits   Limits
 }
 
 // NewReplica builds a materialized view whose durability is provided by its
@@ -393,23 +398,91 @@ func matchFilter(filter, topic string) bool {
 
 // applyRelease removes the publisher's pending packet and enqueues subscriber
 // deliveries from one record. Replay evaluates it against the same session state.
-func (s *Store) applyRelease(id string, packetID uint16, version uint64, skipDelivery bool) {
+func (s *Store) applyRelease(id string, packetID uint16, version uint64, skipDelivery bool, at time.Time) {
 	source := s.entries[id].state
 	message := source.Inbound[packetID]
+	message.QueuedAt = at
 	s.applyFanout(id, packetID, message, version, skipDelivery)
 }
 
-// FanoutReplica applies an ordinary committed publication to replicated queues.
-func (s *Store) FanoutReplica(message Message) {
+func matchingQoS(state *State, message Message) (qos byte) {
+	for filter, q := range state.Subscriptions {
+		if q > qos && matchFilter(filter, message.Topic) {
+			qos = min(q, message.QoS)
+		}
+	}
+	return qos
+}
+
+func (s *Store) checkFanout(limits Limits, id string, message Message) error {
+	if !limits.Enabled() {
+		return nil
+	}
+	deliveryBytes := messageBytes(message)
+	for target, e := range s.entries {
+		if e.state == nil || target == id || matchingQoS(e.state, message) == 0 {
+			continue
+		}
+		before := e.pending
+		after := before
+		after.Messages++
+		after.Bytes += deliveryBytes
+		if !limits.admits(before, after) {
+			return ErrQuota
+		}
+	}
+	return nil
+}
+
+// Fanout admits all matching durable deliveries atomically or none of them.
+func (s *Store) Fanout(message Message, limits Limits) error {
 	if message.QoS == 0 {
-		return
+		return nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.applyFanout("", 0, message, s.sequence+1, false)
+	if s.closed {
+		return storage.ErrClosed
+	}
+	if s.failed != nil {
+		return s.failed
+	}
+	if validate("fanout", &State{Queue: []Message{message}}) != nil || s.sequence == ^uint64(0) {
+		return ErrInvalid
+	}
+	if err := s.checkFanout(limits, "", message); err != nil {
+		return err
+	}
+	version := s.sequence + 1
+	if s.log != nil {
+		matched := false
+		for _, e := range s.entries {
+			if e.state != nil && matchingQoS(e.state, message) != 0 {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return nil
+		}
+		data, err := json.Marshal(record{Format: 6, Sequence: version, Publication: &message})
+		if err != nil {
+			return err
+		}
+		if len(data) > storage.MaxRecordSize {
+			return storage.ErrTooLarge
+		}
+		if err := s.append(data); err != nil {
+			s.failed = err
+			return err
+		}
+	}
+	s.applyFanout("", 0, copyMessage(message), version, false)
+	return nil
 }
 
 func (s *Store) applyFanout(id string, packetID uint16, message Message, version uint64, skipDelivery bool) {
+	deliveryBytes := messageBytes(message)
 	for target, e := range s.entries {
 		if e.state == nil {
 			continue
@@ -417,22 +490,22 @@ func (s *Store) applyFanout(id string, packetID uint16, message Message, version
 		next := *e.state
 		if target == id {
 			delete(next.Inbound, packetID)
+			e.pending.Messages--
+			e.pending.Bytes -= deliveryBytes
 		}
 		var qos byte
 		if !skipDelivery {
-			for filter, q := range next.Subscriptions {
-				if q > qos && matchFilter(filter, message.Topic) {
-					qos = min(q, message.QoS)
-				}
-			}
+			qos = matchingQoS(&next, message)
 		}
 		if qos > 0 {
 			delivery := message
 			delivery.QoS, delivery.Retain = qos, false
 			next.Queue = append(next.Queue, delivery)
+			e.pending.Messages++
+			e.pending.Bytes += deliveryBytes
 		}
 		if target == id || qos > 0 {
-			s.entries[target] = entry{version, &next}
+			s.entries[target] = entry{version, &next, e.pending}
 		}
 	}
 	s.sequence = version
@@ -656,11 +729,18 @@ func (s *Store) ReadSubscriptions(id, afterFilter string, limit, maxBytes int) (
 
 // Open replays the entire log and fails closed on malformed records.
 func Open(path string) (*Store, error) {
+	return OpenLimited(path, Limits{})
+}
+
+func OpenLimited(path string, limits Limits) (*Store, error) {
+	if !limits.Valid() {
+		return nil, ErrInvalid
+	}
 	l, err := storage.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{log: l, entries: make(map[string]entry)}
+	s := &Store{log: l, limits: limits, entries: make(map[string]entry)}
 	err = l.Replay(func(data []byte) error {
 		if !utf8.Valid(data) || !validSurrogates(data) {
 			return ErrCorrupt
@@ -674,7 +754,18 @@ func Open(path string) (*Store, error) {
 		if err := d.Decode(new(any)); err != io.EOF {
 			return ErrCorrupt
 		}
-		if r.Sequence == 0 || r.Sequence != s.sequence+1 || r.ClientID == "" || !utf8.ValidString(r.ClientID) {
+		if r.Sequence == 0 || r.Sequence != s.sequence+1 {
+			return ErrCorrupt
+		}
+		if r.Format == 6 {
+			if r.Publication == nil || r.ClientID != "" || r.Batch != nil || r.State != nil || r.Release != 0 || r.SkipDelivery || !r.At.IsZero() ||
+				validate("fanout", &State{Queue: []Message{*r.Publication}}) != nil {
+				return ErrCorrupt
+			}
+			s.applyFanout("", 0, *r.Publication, r.Sequence, false)
+			return nil
+		}
+		if r.Publication != nil || r.ClientID == "" || !utf8.ValidString(r.ClientID) || (r.Format != 5 && !r.At.IsZero()) {
 			return ErrCorrupt
 		}
 		if r.Format == 5 {
@@ -685,7 +776,7 @@ func Open(path string) (*Store, error) {
 			if _, ok := e.state.Inbound[r.Release]; !ok {
 				return ErrCorrupt
 			}
-			s.applyRelease(r.ClientID, r.Release, r.Sequence, r.SkipDelivery)
+			s.applyRelease(r.ClientID, r.Release, r.Sequence, r.SkipDelivery, r.At)
 			return nil
 		}
 		if r.Release != 0 || r.SkipDelivery {
@@ -725,8 +816,14 @@ func Open(path string) (*Store, error) {
 		} else {
 			return ErrCorrupt
 		}
+		var usage Usage
+		if r.Batch == nil {
+			usage = pending(r.State)
+		} else {
+			usage = pendingAfterBatch(s.entries[r.ClientID], r.State, r.Batch)
+		}
 		s.sequence = r.Sequence
-		s.entries[r.ClientID] = entry{r.Sequence, r.State}
+		s.entries[r.ClientID] = entry{r.Sequence, r.State, usage}
 		return nil
 	})
 	if err != nil {
@@ -826,7 +923,7 @@ func (s *Store) Put(id string, expected uint64, state *State) (uint64, error) {
 		return 0, err
 	}
 	s.sequence = r.Sequence
-	s.entries[id] = entry{r.Sequence, r.State}
+	s.entries[id] = entry{r.Sequence, r.State, pending(r.State)}
 	return r.Sequence, nil
 }
 
@@ -834,12 +931,16 @@ func (s *Store) Put(id string, expected uint64, state *State) (uint64, error) {
 // The total backlog can exceed MaxRecordSize; each individual batch cannot.
 // Input must not be mutated concurrently. Failed appends require reopening.
 func (s *Store) Apply(id string, expected uint64, batch Batch) (uint64, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.apply(id, expected, batch)
+	return s.ApplyLimited(id, expected, batch, s.limits)
 }
 
-func (s *Store) apply(id string, expected uint64, batch Batch) (uint64, error) {
+func (s *Store) ApplyLimited(id string, expected uint64, batch Batch, limits Limits) (uint64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.apply(id, expected, batch, limits)
+}
+
+func (s *Store) apply(id string, expected uint64, batch Batch, limits Limits) (uint64, error) {
 	if s.closed {
 		return 0, storage.ErrClosed
 	}
@@ -859,6 +960,11 @@ func (s *Store) apply(id string, expected uint64, batch Batch) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
+	prev := s.entries[id]
+	usage := pendingAfterBatch(prev, next, &batch)
+	if !limits.admits(prev.pending, usage) {
+		return 0, ErrQuota
+	}
 	r := record{Format: 4, Sequence: s.sequence + 1, ClientID: id, Batch: &batch}
 	data, err := json.Marshal(r)
 	if err != nil {
@@ -872,7 +978,7 @@ func (s *Store) apply(id string, expected uint64, batch Batch) (uint64, error) {
 		return 0, err
 	}
 	s.sequence = r.Sequence
-	s.entries[id] = entry{r.Sequence, next}
+	s.entries[id] = entry{r.Sequence, next, usage}
 	return r.Sequence, nil
 }
 
@@ -892,6 +998,10 @@ func (s *Store) Close() error {
 // Receive records the first PUBLISH for this ID before PUBREC. Retries do not
 // replace the original payload, even if the client sends a different payload.
 func (s *Store) Receive(id string, epoch uint64, packetID uint16, message Message, maximum int) error {
+	return s.ReceiveLimited(id, epoch, packetID, message, maximum, s.limits)
+}
+
+func (s *Store) ReceiveLimited(id string, epoch uint64, packetID uint16, message Message, maximum int, limits Limits) error {
 	if packetID == 0 {
 		return ErrInvalid
 	}
@@ -914,12 +1024,19 @@ func (s *Store) Receive(id string, epoch uint64, packetID uint16, message Messag
 	if maximum > 0 && len(state.Inbound) >= maximum {
 		return ErrInvalid
 	}
-	_, err := s.apply(id, e.version, Batch{ExpectedEpoch: &epoch, Receive: map[uint16]Message{packetID: message}})
+	if err := s.checkFanout(limits, id, message); err != nil {
+		return err
+	}
+	_, err := s.apply(id, e.version, Batch{ExpectedEpoch: &epoch, Receive: map[uint16]Message{packetID: message}}, limits)
 	return err
 }
 
 // Release commits the transition and durable fanout before PUBCOMP.
 func (s *Store) Release(id string, epoch uint64, packetID uint16, now time.Time) (Message, bool, error) {
+	return s.ReleaseLimited(id, epoch, packetID, now, s.limits)
+}
+
+func (s *Store) ReleaseLimited(id string, epoch uint64, packetID uint16, now time.Time, limits Limits) (Message, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -937,7 +1054,12 @@ func (s *Store) Release(id string, epoch uint64, packetID uint16, now time.Time)
 		return Message{}, false, nil
 	}
 	expired := message.Metadata != nil && !message.Metadata.ExpiresAt.IsZero() && !now.Before(message.Metadata.ExpiresAt)
-	r := record{Format: 5, Sequence: s.sequence + 1, ClientID: id, Release: packetID, SkipDelivery: expired}
+	if !expired {
+		if err := s.checkFanout(limits, id, message); err != nil {
+			return Message{}, false, err
+		}
+	}
+	r := record{Format: 5, Sequence: s.sequence + 1, ClientID: id, Release: packetID, SkipDelivery: expired, At: now.UTC()}
 	if r.Sequence == 0 {
 		return Message{}, false, ErrInvalid
 	}
@@ -949,7 +1071,7 @@ func (s *Store) Release(id string, epoch uint64, packetID uint16, now time.Time)
 		s.failed = err
 		return Message{}, false, err
 	}
-	s.applyRelease(id, packetID, r.Sequence, expired)
+	s.applyRelease(id, packetID, r.Sequence, expired, r.At)
 	if expired {
 		return Message{}, true, nil
 	}

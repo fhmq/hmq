@@ -296,9 +296,20 @@ func (f *quorumForward) handle(peer string, data []byte) {
 		return
 	}
 	var pub clusterPublish
-	if !(f.r != nil && f.r.sessions != nil && decodeQuorumSession(m.Payload) != nil) &&
-		(stdjson.Unmarshal(m.Payload, &pub) != nil || !validQuorumPublication(&packets.PublishPacket{FixedHeader: packets.FixedHeader{Qos: pub.QoS, Retain: pub.Retain}, TopicName: pub.Topic, Payload: pub.Payload})) {
-		return
+	var sessions *quorumSessions
+	if f.r != nil {
+		sessions = f.r.sessions
+	}
+	if cmd := decodeQuorumSession(m.Payload); cmd != nil {
+		if sessions == nil || cmd.quota() != sessions.limits {
+			return
+		}
+	} else {
+		if stdjson.Unmarshal(m.Payload, &pub) != nil ||
+			!validQuorumPublication(&packets.PublishPacket{FixedHeader: packets.FixedHeader{Qos: pub.QoS, Retain: pub.Retain}, TopicName: pub.Topic, Payload: pub.Payload}) ||
+			(sessions != nil && sessions.limits.Enabled() && pub.QoS != 0) {
+			return
+		}
 	}
 	if f.peers[peer] >= quorumForwardPeerLimit || f.workBytes+len(data) > quorumForwardBytes {
 		return

@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/fhmq/hmq/v4/broker/sessionstore"
 	"github.com/fhmq/hmq/v4/logger"
 	"github.com/fhmq/hmq/v4/plugins/auth"
 	"github.com/fhmq/hmq/v4/plugins/bridge"
@@ -44,8 +45,9 @@ type Config struct {
 	UnixFilePath          string    `json:"unixFilePath"`
 	WindowsPipeName       string    `json:"windowsPipeName"`
 	RetainedLogPath       string    `json:"retainedLogPath"`
-	// ExperimentalSessionLogPath opens a standalone log; it does not enable session persistence.
-	ExperimentalSessionLogPath string `json:"experimentalSessionLogPath"`
+	// ExperimentalSessionLogPath enables standalone session persistence.
+	ExperimentalSessionLogPath string              `json:"experimentalSessionLogPath"`
+	SessionQuota               sessionstore.Limits `json:"sessionQuota"`
 }
 
 type Plugins struct {
@@ -327,6 +329,12 @@ func (config *Config) check() error {
 }
 
 func validateSessionLogPath(config *Config) error {
+	if !config.SessionQuota.Valid() {
+		return errors.New("session quota limits must not be negative")
+	}
+	if config.SessionQuota.Enabled() && config.ExperimentalSessionLogPath == "" && !config.Cluster.Quorum.SessionPersistence {
+		return errors.New("session quota requires a built-in persistent session backend")
+	}
 	if err := validateQuorumConfig(config); err != nil {
 		return err
 	}

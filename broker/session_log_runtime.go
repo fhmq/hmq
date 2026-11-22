@@ -238,7 +238,7 @@ func (b *Broker) routeDurable(packet *packets.PublishPacket) error {
 			if qos == 0 {
 				return nil
 			}
-			return b.applySession(id, sessionstore.Batch{Enqueue: []sessionstore.Message{{Topic: packet.TopicName, Payload: packet.Payload, QoS: qos, Metadata: packets.CloneMetadata(packet.Metadata)}}})
+			return b.applySession(id, sessionstore.Batch{Enqueue: []sessionstore.Message{{Topic: packet.TopicName, Payload: packet.Payload, QoS: qos, Metadata: packets.CloneMetadata(packet.Metadata), QueuedAt: time.Now().UTC()}}})
 		}()
 		unlock()
 		if err != nil {
@@ -456,7 +456,7 @@ func (c *client) enqueueSessionDelivery(packet *packets.PublishPacket) error {
 	c.outboundSendMu.Lock()
 	defer c.outboundSendMu.Unlock()
 	epoch := c.durableEpoch
-	err := c.broker.applySession(c.info.clientID, sessionstore.Batch{ExpectedEpoch: &epoch, Enqueue: []sessionstore.Message{{Topic: packet.TopicName, Payload: packet.Payload, QoS: packet.Qos, Retain: packet.Retain, Metadata: packets.CloneMetadata(packet.Metadata)}}})
+	err := c.broker.applySession(c.info.clientID, sessionstore.Batch{ExpectedEpoch: &epoch, Enqueue: []sessionstore.Message{{Topic: packet.TopicName, Payload: packet.Payload, QoS: packet.Qos, Retain: packet.Retain, Metadata: packets.CloneMetadata(packet.Metadata), QueuedAt: time.Now().UTC()}}})
 	if err != nil {
 		return err
 	}

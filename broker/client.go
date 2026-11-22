@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -46,6 +47,7 @@ const (
 var groupCompile = regexp.MustCompile(_GroupTopicRegexp)
 
 type client struct {
+	slowConsumer     atomic.Bool
 	typ              int
 	mu               sync.Mutex
 	writeMu          sync.Mutex
@@ -398,7 +400,8 @@ func ProcessMessage(msg *Message) {
 		}
 	case *packets.PubrelPacket:
 		if c.durable() || c.broker.quorumEnabled() && c.durableEpoch != 0 {
-			closeAfterRoute = c.releaseDurableQoS2(ca.MessageID) != nil
+			err := c.releaseDurableQoS2(ca.MessageID)
+			closeAfterRoute = err != nil && !c.rejectQuota(nil, err)
 			return
 		}
 		if c.broker.quorumEnabled() {
@@ -492,7 +495,9 @@ func (c *client) processClientPublish(packet *packets.PublishPacket) {
 	}
 	if packet.Qos == QosExactlyOnce && c.durable() {
 		if err := c.receiveDurableQoS2(packet); err != nil {
-			c.Close()
+			if !c.rejectQuota(packet, err) {
+				c.Close()
+			}
 		}
 		return
 	}
@@ -550,6 +555,9 @@ func (c *client) processClientPublish(packet *packets.PublishPacket) {
 			return
 		}
 		if err := c.broker.publishLocal(packet); err != nil {
+			if c.rejectQuota(packet, err) {
+				return
+			}
 			log.Error("local publish", zap.Error(err), zap.String("ClientID", c.info.clientID))
 			c.Close()
 			return

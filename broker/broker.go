@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	mqtt5 "github.com/eclipse/paho.golang/packets"
@@ -73,6 +74,9 @@ type Broker struct {
 	quorumRuntime    *quorumRuntime
 	forwardMu        sync.RWMutex
 	forwardPublish   func(*packets.PublishPacket) error
+
+	slowConsumerDisconnects atomic.Uint64
+	sessionQuotaRejections  atomic.Uint64
 }
 
 type connectLock struct {
@@ -262,7 +266,7 @@ func NewBrokerWithSessionStorage(config *Config, backend SessionStorage) (*Broke
 		return nil, err
 	}
 	if config.ExperimentalSessionLogPath != "" {
-		store, err := sessionstore.Open(config.ExperimentalSessionLogPath)
+		store, err := sessionstore.OpenLimited(config.ExperimentalSessionLogPath, config.SessionQuota)
 		if err != nil {
 			_ = b.sessionMgr.Close()
 			_ = b.topicsMgr.Close()
@@ -319,15 +323,15 @@ func NewBrokerWithSessionStorage(config *Config, backend SessionStorage) (*Broke
 		}
 		gate := make(chan struct{})
 		if c.Quorum.Enabled {
-			b.quorumRuntime, err = openQuorumRuntime(c,
+			b.quorumRuntime, err = openQuorumRuntimeLimited(c,
 				&tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{cert}, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: roots},
-				&tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{cert}, RootCAs: roots})
+				&tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{cert}, RootCAs: roots}, config.SessionQuota)
 			if err != nil {
 				b.Close()
 				return nil, err
 			}
 			if c.Quorum.SessionPersistence {
-				s := &quorumSessions{Store: sessionstore.NewReplica(), r: b.quorumRuntime, results: make(map[uint64]quorumSessionResult)}
+				s := &quorumSessions{Store: sessionstore.NewReplica(), r: b.quorumRuntime, limits: config.SessionQuota, results: make(map[uint64]quorumSessionResult)}
 				b.quorumRuntime.sessions = s
 				b.sessionLog = s
 			}
@@ -1102,6 +1106,7 @@ type clusterPublish struct {
 	QoS      byte
 	Retain   bool
 	Metadata *packets.PublishMetadata `json:",omitempty"`
+	QueuedAt time.Time                `json:",omitzero"`
 }
 
 func clusterPublication(p *packets.PublishPacket) clusterPublish {
@@ -1176,6 +1181,14 @@ func (b *Broker) publishCommittedLocal(packet *packets.PublishPacket) error {
 	if packet.Metadata != nil && !packet.Metadata.ExpiresAt.IsZero() && !time.Now().Before(packet.Metadata.ExpiresAt) {
 		return nil
 	}
+	if store, ok := b.sessionLog.(*sessionstore.Store); ok && b.config != nil && b.config.SessionQuota.Enabled() && packet.Qos > 0 {
+		msg := sessionstore.Message{Topic: packet.TopicName, Payload: packet.Payload, QoS: packet.Qos, Metadata: packet.Metadata, QueuedAt: time.Now().UTC()}
+		if err := store.Fanout(msg, b.config.SessionQuota); err != nil {
+			return err
+		}
+		b.pumpQoS2Subscribers(false)
+		return b.publishTransientLocal(packet, true)
+	}
 	if err := b.routeDurable(packet); err != nil {
 		return err
 	}
@@ -1234,6 +1247,7 @@ func (b *Broker) publishTransientLocal(packet *packets.PublishPacket, includeDur
 		}
 		err := publish(active, packet, qos)
 		if errors.Is(err, errSlowConsumer) {
+			b.recordSlowConsumer(current)
 			interruptedClient = current
 			return false, nil
 		}
@@ -1251,6 +1265,7 @@ func (b *Broker) publishTransientLocal(packet *packets.PublishPacket, includeDur
 		if errors.As(err, &netErr) && netErr.Timeout() {
 			// A timed-out write may have sent a prefix. Detach the slow
 			// recipient without failing the publisher or retrying fanout.
+			b.recordSlowConsumer(current)
 			interruptedClient = current
 			return true, nil
 		}

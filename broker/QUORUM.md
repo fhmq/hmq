@@ -50,9 +50,15 @@ the original message; PUBCOMP follows the commit that removes it and enqueues
 durable subscriber deliveries. Outbound PUBLISH/PUBREL phase and Packet ID are
 recovered on a new node. A new CONNECT changes the epoch, so a stale owner
 cannot mutate the replacement session. A clean session is not resumable.
-Durable session storage is still experimental: journal entries count toward
-partition capacity, and there is no history reclamation or durable backlog
-quota. Transient routing remains subject to cursor replay.
+Durable session storage is still experimental. A configured
+[`sessionQuota`](sessionstore/RUNTIME.md#pending-message-quota-and-capacity)
+applies to all matching durable queues before a successful publisher ACK.
+Use the same quota on all members; changing it requires a coordinated
+restart, since mismatched quota profiles do not form a Raft quorum.
+The admission policy for each command is recorded in the log so replay
+preserves past outcomes even after configuration changes. Rejected
+commands can still occupy history space. There is no history reclamation;
+transient routing remains subject to cursor replay.
 
 Retained messages/storage, shared subscriptions, will messages, standalone
 session logs, bridge plugins, directed delivery, reserved `$` publication topics

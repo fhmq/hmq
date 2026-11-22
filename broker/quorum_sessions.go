@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fhmq/hmq/v4/broker/packets"
 	"github.com/fhmq/hmq/v4/broker/replication"
 	"github.com/fhmq/hmq/v4/broker/sessionstore"
 )
@@ -35,14 +36,28 @@ type quorumSessionCommand struct {
 	Batch     *sessionstore.Batch   `json:",omitempty"`
 	Message   *sessionstore.Message `json:",omitempty"`
 	Time      *time.Time            `json:",omitempty"`
+	Quota     *sessionstore.Limits  `json:",omitempty"`
+}
+
+func (c *quorumSessionCommand) quota() sessionstore.Limits {
+	if c.Quota != nil {
+		return *c.Quota
+	}
+	return sessionstore.Limits{}
 }
 
 func decodeQuorumSession(data []byte) *quorumSessionCommand {
 	var c quorumSessionCommand
-	if stdjson.Unmarshal(data, &c) != nil {
+	if stdjson.Unmarshal(data, &c) != nil || !c.quota().Valid() {
 		return nil
 	}
 	switch c.SessionOp {
+	case "publish":
+		if c.Message == nil || c.Message.QoS != 1 ||
+			!validQuorumPublication(&packets.PublishPacket{FixedHeader: packets.FixedHeader{Qos: 1, Retain: c.Message.Retain}, TopicName: c.Message.Topic, Payload: c.Message.Payload}) {
+			return nil
+		}
+		return &c
 	case "barrier":
 		return &c
 	case "put", "apply", "receive", "release":
@@ -72,6 +87,7 @@ type quorumSessionResult struct {
 type quorumSessions struct {
 	*sessionstore.Store
 	r       *quorumRuntime
+	limits  sessionstore.Limits
 	mu      sync.Mutex
 	index   uint64
 	results map[uint64]quorumSessionResult
@@ -95,11 +111,16 @@ func (s *quorumSessions) advance(through uint64) (quorumSessionResult, bool, err
 				case "put":
 					r.version, r.err = s.Store.Put(cmd.ID, cmd.Version, cmd.State)
 				case "apply":
-					r.version, r.err = s.Store.Apply(cmd.ID, cmd.Version, *cmd.Batch)
+					r.version, r.err = s.Store.ApplyLimited(cmd.ID, cmd.Version, *cmd.Batch, cmd.quota())
 				case "receive":
-					r.err = s.Store.Receive(cmd.ID, cmd.Version, cmd.PacketID, *cmd.Message, cmd.Maximum)
+					r.err = s.Store.ReceiveLimited(cmd.ID, cmd.Version, cmd.PacketID, *cmd.Message, cmd.Maximum, cmd.quota())
 				case "release":
-					r.message, r.found, r.err = s.Store.Release(cmd.ID, cmd.Version, cmd.PacketID, *cmd.Time)
+					r.message, r.found, r.err = s.Store.ReleaseLimited(cmd.ID, cmd.Version, cmd.PacketID, *cmd.Time, cmd.quota())
+				case "publish":
+					r.err = s.Store.Fanout(*cmd.Message, cmd.quota())
+					if r.err == nil {
+						r.message = *cmd.Message
+					}
 				}
 				s.results[e.Index] = r
 			} else {
@@ -107,7 +128,9 @@ func (s *quorumSessions) advance(through uint64) (quorumSessionResult, bool, err
 				if err := stdjson.Unmarshal(e.Payload, &p); err != nil || p.Topic == "" {
 					return quorumSessionResult{}, false, replication.ErrInvalid
 				}
-				s.Store.FanoutReplica(sessionstore.Message{Topic: p.Topic, Payload: p.Payload, QoS: p.QoS, Metadata: p.Metadata})
+				if err := s.Store.Fanout(sessionstore.Message{Topic: p.Topic, Payload: p.Payload, QoS: p.QoS, Metadata: p.Metadata, QueuedAt: p.QueuedAt}, sessionstore.Limits{}); err != nil {
+					return quorumSessionResult{}, false, err
+				}
 			}
 			s.index = e.Index
 			if e.Index == through {
@@ -119,6 +142,9 @@ func (s *quorumSessions) advance(through uint64) (quorumSessionResult, bool, err
 }
 
 func (s *quorumSessions) commit(c quorumSessionCommand) (quorumSessionResult, error) {
+	if s.limits.Enabled() {
+		c.Quota = &s.limits
+	}
 	data, err := stdjson.Marshal(c)
 	if err != nil {
 		return quorumSessionResult{}, err

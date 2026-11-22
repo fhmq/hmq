@@ -180,6 +180,20 @@ func (n *Node) Leader() (raft.ServerAddress, raft.ServerID) { return n.raft.Lead
 // LastIndex is a local log/snapshot bound, not proof of quorum commitment.
 func (n *Node) LastIndex() uint64 { return n.raft.LastIndex() }
 
+type Capacity struct {
+	Entries    int `json:"entries"`
+	Bytes      int `json:"bytes"`
+	MaxEntries int `json:"maxEntries"`
+	MaxBytes   int `json:"maxBytes"`
+}
+
+// Capacity describes local retained application history, not Raft WAL disk use.
+func (n *Node) Capacity() Capacity {
+	n.fsm.mu.RLock()
+	defer n.fsm.mu.RUnlock()
+	return Capacity{len(n.fsm.entries), n.fsm.bytes, maxPartitionEntries, maxPartitionBytes}
+}
+
 // Entries is a local applied-state view, not a linearizable read. A follower may
 // lag. Callers must not interpret it as a quorum-confirmed read barrier.
 func (n *Node) Entries(after uint64, limit int) ([]Entry, error) {
