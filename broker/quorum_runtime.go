@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/tls"
 	"encoding/hex"
@@ -21,6 +22,7 @@ import (
 	"github.com/fhmq/hmq/v4/broker/sessionstore"
 	"github.com/fhmq/hmq/v4/broker/storage"
 	"github.com/hashicorp/raft"
+	"go.uber.org/zap"
 )
 
 var ErrQuorumRoutingUnavailable = errors.New("quorum: unsupported publication or side effect")
@@ -181,8 +183,15 @@ func openQuorumRuntimeLimited(c RouteInfo, serverTLS, clientTLS *tls.Config, quo
 		application = "sessions-v1"
 	}
 	wireApplication := application
+	kernel := raft.DefaultConfig()
+	var checkpoint func([]byte, []replication.Entry) ([]byte, error)
+	if c.Quorum.SessionPersistence {
+		checkpoint = compactSessions
+		wireApplication += "/checkpoint-v2"
+		kernel.TrailingLogs = 128
+	}
 	if quota.Enabled() {
-		wireApplication = fmt.Sprintf("%s/quota-%d-%d", application, quota.MaxPendingMessages, quota.MaxPendingBytes)
+		wireApplication += fmt.Sprintf("/quota-%d-%d", quota.MaxPendingMessages, quota.MaxPendingBytes)
 	}
 	layer, err := replication.ListenTLS(replication.TLSStreamConfig{ID: c.NodeID, ClusterID: c.ClusterID, Listen: c.Quorum.Listen, Peers: c.Quorum.Peers, ServerTLS: serverTLS, ClientTLS: clientTLS, Timeout: 5 * time.Second, Application: wireApplication})
 	if err != nil {
@@ -198,7 +207,7 @@ func openQuorumRuntimeLimited(c RouteInfo, serverTLS, clientTLS *tls.Config, quo
 	for _, id := range ids {
 		servers = append(servers, raft.Server{ID: raft.ServerID(id), Address: raft.ServerAddress(c.Quorum.Peers[id]), Suffrage: raft.Voter})
 	}
-	node, err := replication.Open(replication.Config{ID: c.NodeID, ClusterID: c.ClusterID, Dir: dir, Transport: transport, Bootstrap: servers, Application: application})
+	node, err := replication.Open(replication.Config{ID: c.NodeID, ClusterID: c.ClusterID, Dir: dir, Transport: transport, Bootstrap: servers, Application: application, Checkpoint: checkpoint, RaftConfig: kernel})
 	if err != nil {
 		_ = transport.Close()
 		return nil, err
@@ -208,12 +217,45 @@ func openQuorumRuntimeLimited(c RouteInfo, serverTLS, clientTLS *tls.Config, quo
 		_ = closeQuorumNetwork(node, transport)
 		return nil, err
 	}
-	if cursor > node.LastIndex() {
+	if cursor > node.LastIndex() || cursor < node.Floor() {
 		_ = cursorLog.Close()
 		_ = closeQuorumNetwork(node, transport)
-		return nil, errors.New("quorum: delivery cursor exceeds local Raft log/snapshot upper bound")
+		return nil, errors.New("quorum: delivery cursor outside retained Raft history")
 	}
 	return &quorumRuntime{node: node, transport: transport, cursorLog: cursorLog, cursor: cursor, stop: make(chan struct{}), done: make(chan struct{}), proposals: make(chan struct{}, quorumProposalLimit)}, nil
+}
+
+func (r *quorumRuntime) maintainHistory(ctx context.Context) {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	var reported, saved uint64
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		r.mu.RLock()
+		cursor := r.cursor
+		r.mu.RUnlock()
+		if cursor > reported {
+			data, _ := stdjson.Marshal(quorumProgress{HistoryCursor: cursor})
+			if _, err := r.forward.commit(data); err == nil {
+				reported = cursor
+			}
+		}
+		if err := r.sessions.restoreApplied(); err != nil {
+			log.Warn("restore Raft session checkpoint", zap.Error(err))
+			continue
+		}
+		if floor := r.node.Floor(); floor > saved {
+			if err := r.node.CheckpointWAL(); err != nil {
+				log.Warn("checkpoint Raft WAL", zap.Error(err))
+			} else {
+				saved = floor
+			}
+		}
+	}
 }
 
 func (r *quorumRuntime) BeginClose() {
@@ -388,6 +430,7 @@ func (r *quorumRuntime) startConsumer(id, clusterID string, deliver func(*packet
 			after := r.cursor
 			r.mu.RUnlock()
 			entries, err := r.node.Entries(after, 64)
+			completed := after
 			for _, entry := range entries {
 				select {
 				case <-r.stop:
@@ -397,15 +440,18 @@ func (r *quorumRuntime) startConsumer(id, clusterID string, deliver func(*packet
 				if err = r.consumeEntry(entry, deliver); err != nil {
 					break
 				}
-				data, _ := stdjson.Marshal(quorumCursorRecord{1, id, clusterID, entry.Index})
-				if err = r.cursorLog.Append(data); err != nil {
+				completed = entry.Index
+			}
+			if completed > after {
+				data, _ := stdjson.Marshal(quorumCursorRecord{1, id, clusterID, completed})
+				if appendErr := r.cursorLog.Append(data); appendErr != nil {
 					r.mu.Lock()
-					r.consumeErr = err
+					r.consumeErr = appendErr
 					r.mu.Unlock()
 					return // WAL errors are poisoned; reopening is required.
 				}
 				r.mu.Lock()
-				r.cursor = entry.Index
+				r.cursor = completed
 				r.mu.Unlock()
 			}
 			r.mu.Lock()

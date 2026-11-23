@@ -187,7 +187,7 @@ failed WAL writes stop consumption until restart. Crash recovery can repeat an
 entry, including partial fanout. This is NOT exactly-once or durable subscriber
 receipt: PUBACK confirms the publication log, not every replica's delivery or a
 subscriber's acknowledgment. No-subscriber entries are considered locally routed.
-The log and cursor have no compaction; monitor disk use and kernel capacity.
+The cursor WAL is append-only; monitor disk use and kernel capacity.
 
 Without `sessionPersistence` only clean online sessions are supported. Set
 `cluster.quorum.sessionPersistence: true` on every member, with fresh quorum data
@@ -202,8 +202,10 @@ Retained publications/storage, shared subscriptions, Will, bridge plugins and
 `experimentalSessionLogPath` are still rejected in quorum mode.
 Reserved `$` publication topics, directed delivery and legacy cluster messages
 cannot bypass the quorum path. No bridge side effect executes before commit.
-Session commands count toward the existing partition capacity; there is no
-safe history reclamation or production backlog quota in this profile.
+Session commands count toward the existing partition capacity. With session
+persistence, [checkpoint-based history reclamation](../broker/QUORUM.md#replicated-history-reclamation)
+is limited by the slowest member's durable delivery cursor. Use
+`sessionQuota` to bound pending messages per session separately.
 
 `GET /api/v1/cluster/quorum` reports local Raft `state`, observed `leaderID`,
 `partitions: 1`, `routing: "quorum_qos01_nonretained"` (or

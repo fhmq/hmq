@@ -25,6 +25,9 @@ type Config struct {
 	Application string
 	// RaftConfig is copied; LocalID and LogOutput are supplied by this package.
 	RaftConfig *raft.Config
+	// Checkpoint folds a committed prefix into an immutable JSON checkpoint.
+	// Its inputs are read-only; it must be deterministic across members.
+	Checkpoint func([]byte, []Entry) ([]byte, error)
 }
 type Node struct {
 	raft     *raft.Raft
@@ -67,10 +70,14 @@ func Open(config Config) (*Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	snapshots, err := raft.NewFileSnapshotStore(config.Dir, 2, io.Discard)
+	files, err := raft.NewFileSnapshotStore(config.Dir, 2, io.Discard)
 	if err != nil {
 		store.Close()
 		return nil, err
+	}
+	var snapshots raft.SnapshotStore = files
+	if config.Checkpoint != nil {
+		snapshots = checkpointSnapshots{files, store}
 	}
 	existing, err := raft.HasExistingState(store, store, snapshots)
 	if err != nil {
@@ -106,7 +113,13 @@ func Open(config Config) (*Node, error) {
 			return nil, err
 		}
 	}
-	fsm := &partition{}
+	fsm := &partition{compact: config.Checkpoint}
+	if config.Checkpoint != nil {
+		fsm.members = make(map[string]bool, len(config.Bootstrap))
+		for _, member := range config.Bootstrap {
+			fsm.members[string(member.ID)] = true
+		}
+	}
 	r, err := raft.NewRaft(settings, fsm, store, store, snapshots, config.Transport)
 	if err != nil {
 		store.Close()
@@ -118,8 +131,26 @@ func Open(config Config) (*Node, error) {
 // Publish reports success only after quorum commit and local FSM application.
 // A timeout/lost leadership is an uncertain outcome; retry the same ID/payload.
 func (n *Node) Publish(id string, payload []byte, timeout time.Duration) (uint64, error) {
-	c := command{id, payload}
-	if !validCommand(c) || timeout <= 0 {
+	return n.PublishAt(id, payload, 0, timeout)
+}
+
+func (n *Node) PublishAt(id string, payload []byte, floor uint64, timeout time.Duration) (uint64, error) {
+	c := command{ID: id, Payload: payload, Floor: floor}
+	if !validCommand(c) {
+		return 0, ErrInvalid
+	}
+	return n.propose(c, timeout)
+}
+
+func (n *Node) ReportProgress(update Progress, timeout time.Duration) (uint64, error) {
+	if !n.fsm.members[update.Member] || update.Cursor == 0 {
+		return 0, ErrInvalid
+	}
+	return n.propose(command{Progress: &update}, timeout)
+}
+
+func (n *Node) propose(c command, timeout time.Duration) (uint64, error) {
+	if timeout <= 0 {
 		return 0, ErrInvalid
 	}
 	deadline := time.Now().Add(timeout)
@@ -130,8 +161,10 @@ func (n *Node) Publish(id string, payload []byte, timeout time.Duration) (uint64
 	if state != raft.Leader {
 		return 0, raft.ErrNotLeader
 	}
-	if err := n.fsm.preflight(c); err != nil {
-		return 0, err
+	if c.Progress == nil {
+		if err := n.fsm.preflight(c); err != nil {
+			return 0, err
+		}
 	}
 	select {
 	case n.pending <- struct{}{}:
@@ -181,17 +214,49 @@ func (n *Node) Leader() (raft.ServerAddress, raft.ServerID) { return n.raft.Lead
 func (n *Node) LastIndex() uint64 { return n.raft.LastIndex() }
 
 type Capacity struct {
-	Entries    int `json:"entries"`
-	Bytes      int `json:"bytes"`
-	MaxEntries int `json:"maxEntries"`
-	MaxBytes   int `json:"maxBytes"`
+	Entries          int    `json:"entries"`
+	Bytes            int    `json:"bytes"`
+	MaxEntries       int    `json:"maxEntries"`
+	MaxBytes         int    `json:"maxBytes"`
+	CompactedThrough uint64 `json:"compactedThrough"`
+	CompactionFailed bool   `json:"compactionFailed"`
 }
 
 // Capacity describes local retained application history, not Raft WAL disk use.
 func (n *Node) Capacity() Capacity {
 	n.fsm.mu.RLock()
 	defer n.fsm.mu.RUnlock()
-	return Capacity{len(n.fsm.entries), n.fsm.bytes, maxPartitionEntries, maxPartitionBytes}
+	return Capacity{len(n.fsm.entries), n.fsm.bytes, maxPartitionEntries, maxPartitionBytes, n.fsm.floor, n.fsm.compactFailed}
+}
+
+func (n *Node) Floor() uint64 {
+	n.fsm.mu.RLock()
+	defer n.fsm.mu.RUnlock()
+	return n.fsm.floor
+}
+
+// HistoryTip is the latest locally applied application entry or checkpoint.
+func (n *Node) HistoryTip() uint64 {
+	p := n.fsm
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if len(p.entries) == 0 {
+		return p.floor
+	}
+	return p.entries[len(p.entries)-1].Index
+}
+
+// History returns one consistent view; consumers behind the floor must first
+// restore its checkpoint, then replay the suffix in order.
+func (n *Node) History(after uint64, limit int) (uint64, []byte, []Entry) {
+	p := n.fsm
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	var checkpoint []byte
+	if after < p.floor {
+		checkpoint = bytes.Clone(p.checkpoint)
+	}
+	return p.floor, checkpoint, p.entriesLocked(after, limit)
 }
 
 // Entries is a local applied-state view, not a linearizable read. A follower may
@@ -200,9 +265,21 @@ func (n *Node) Entries(after uint64, limit int) ([]Entry, error) {
 	if limit <= 0 || limit > 1024 {
 		return nil, ErrInvalid
 	}
-	return n.fsm.entriesAfter(after, limit), nil
+	p := n.fsm
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if after < p.floor {
+		return nil, ErrCompacted
+	}
+	return p.entriesLocked(after, limit), nil
 }
 func (n *Node) Snapshot() error { return n.raft.Snapshot().Error() }
+func (n *Node) CheckpointWAL() error {
+	if err := n.Snapshot(); err != nil && !errors.Is(err, raft.ErrNothingNewToSnapshot) {
+		return err
+	}
+	return n.store.compact()
+}
 func (n *Node) Close() error {
 	n.once.Do(func() { n.closeErr = errors.Join(n.raft.Shutdown().Error(), n.store.Close()) })
 	return n.closeErr

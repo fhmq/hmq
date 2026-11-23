@@ -22,7 +22,7 @@ func (s *testSink) Cancel() error { s.cancelled = true; return nil }
 func TestPartitionCursorAcrossLogGaps(t *testing.T) {
 	p := &partition{}
 	for i, id := range []string{"a", "b", "c"} {
-		data, _ := json.Marshal(command{id, []byte(id)})
+		data, _ := json.Marshal(command{ID: id, Payload: []byte(id)})
 		if r := p.Apply(&raft.Log{Index: uint64(i*10 + 5), Data: data}).(applyResult); r.Err != nil {
 			t.Fatal(r.Err)
 		}
@@ -47,7 +47,7 @@ func TestPartitionCursorAcrossLogGaps(t *testing.T) {
 func TestPartitionDedupSnapshotAndInvalidRestore(t *testing.T) {
 	p := &partition{}
 	apply := func(index uint64, id, payload string) applyResult {
-		data, err := json.Marshal(command{id, []byte(payload)})
+		data, err := json.Marshal(command{ID: id, Payload: []byte(payload)})
 		if err != nil {
 			t.Fatal(err)
 		}

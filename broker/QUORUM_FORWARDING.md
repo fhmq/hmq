@@ -48,8 +48,14 @@ Only successful `Node.Publish` with nonzero
 index proves commitment. Receiving, queueing, writing a frame or reading
 `LastIndex` is not sufficient. Neither forwarding side delivers directly.
 
-FSM deduplication supplies same-ID/same-payload idempotency across internal
-retries, leader changes and snapshots; conflicting payload reuse must fail.
+FSM deduplication supplies same-ID/same-payload idempotency for retained
+operations across internal retries, leader changes and snapshots; conflicting
+payload reuse must fail. In the session-persistence profile every attempt of an
+operation carries its original lower bound (the sender's locally applied
+history tip at submission). Once reclamation passes that bound, a stale
+operation with no retained result fails with uncertain
+outcome rather than being applied again. Progress reports are authenticated
+as the sender's own cursor and are monotonic and idempotent.
 It does not make client reconnects or a follower crash exactly once, because
 those can create a new operation. No extra permanent response cache is needed.
 
@@ -86,5 +92,5 @@ Tests also check relative/clamped budgets, queue time accounting and a request
 write longer than 100 ms. They do not exhaustively inject shutdown at every
 instruction, real clock skew or late Raft commits after timeout. The protocol has
 no wall-clock fields, so correctness does not require synchronized peer clocks.
-There is no dynamic discovery, durable follower pending state, offline MQTT
-session replication or exactly-once delivery across client reconnects/crashes.
+There is no dynamic discovery, durable follower pending request state, or
+exactly-once delivery across client reconnects/crashes.

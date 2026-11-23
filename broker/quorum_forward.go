@@ -36,15 +36,17 @@ type quorumForwardFrameData struct {
 	Payload     []byte `json:",omitempty"`
 	BudgetNanos int64
 	Index       uint64
+	Floor       uint64             `json:",omitempty"`
 	Error       quorumForwardError `json:",omitempty"`
 }
 
 type quorumForwardError string
 
 const (
-	quorumForwardCapacity quorumForwardError = "capacity"
-	quorumForwardConflict quorumForwardError = "conflict"
-	quorumForwardInvalid  quorumForwardError = "invalid"
+	quorumForwardCapacity  quorumForwardError = "capacity"
+	quorumForwardConflict  quorumForwardError = "conflict"
+	quorumForwardInvalid   quorumForwardError = "invalid"
+	quorumForwardCompacted quorumForwardError = "compacted"
 )
 
 func quorumForwardTerminalError(err error) quorumForwardError {
@@ -55,6 +57,8 @@ func quorumForwardTerminalError(err error) quorumForwardError {
 		return quorumForwardConflict
 	case errors.Is(err, replication.ErrInvalid):
 		return quorumForwardInvalid
+	case errors.Is(err, replication.ErrCompacted):
+		return quorumForwardCompacted
 	default:
 		return ""
 	}
@@ -68,6 +72,8 @@ func (e quorumForwardError) err() error {
 		return replication.ErrConflict
 	case quorumForwardInvalid:
 		return replication.ErrInvalid
+	case quorumForwardCompacted:
+		return replication.ErrCompacted
 	default:
 		return nil
 	}
@@ -149,12 +155,36 @@ func (f *quorumForward) publish(data []byte) error {
 	return err
 }
 
+type quorumProgress struct {
+	HistoryCursor uint64
+}
+
+func decodeQuorumProgress(data []byte) uint64 {
+	var p quorumProgress
+	if stdjson.Unmarshal(data, &p) == nil {
+		return p.HistoryCursor
+	}
+	return 0
+}
+
+func (f *quorumForward) propose(member string, frame quorumForwardFrameData, timeout time.Duration) (uint64, error) {
+	if cursor := decodeQuorumProgress(frame.Payload); cursor != 0 {
+		return f.r.node.ReportProgress(replication.Progress{Member: member, Cursor: cursor}, timeout)
+	}
+	return f.r.node.PublishAt(frame.Operation, frame.Payload, frame.Floor, timeout)
+}
+
 func (f *quorumForward) commit(data []byte) (uint64, error) {
 	ctx, cancel := context.WithTimeout(f.ctx, 5*time.Second)
 	defer cancel()
 	op := fmt.Sprintf("%s:%s:%d", f.id, f.boot, f.seq.Add(1))
 	deadline, _ := ctx.Deadline()
 	frame := quorumForwardFrameData{Domain: quorumForwardDomain, Operation: op, Digest: quorumDigest(data), Payload: data, BudgetNanos: int64(5 * time.Second)}
+	if f.r != nil && f.r.node != nil && f.r.sessions != nil {
+		// A new operation cannot commit at or before an already applied
+		// entry. Keep this same lower bound on every retry.
+		frame.Floor = f.r.node.HistoryTip()
+	}
 	wire, _ := stdjson.Marshal(frame)
 	if len(wire) > quorumForwardFrame {
 		return 0, replication.ErrInvalid
@@ -195,7 +225,7 @@ func (f *quorumForward) commit(data []byte) (uint64, error) {
 				if remaining <= 0 {
 					return 0, context.DeadlineExceeded
 				}
-				index, err := f.r.node.Publish(op, data, remaining)
+				index, err := f.propose(f.id, frame, remaining)
 				if quorumForwardTerminalError(err) != "" {
 					return 0, err
 				}
@@ -300,7 +330,11 @@ func (f *quorumForward) handle(peer string, data []byte) {
 	if f.r != nil {
 		sessions = f.r.sessions
 	}
-	if cmd := decodeQuorumSession(m.Payload); cmd != nil {
+	if decodeQuorumProgress(m.Payload) != 0 {
+		if sessions == nil {
+			return
+		}
+	} else if cmd := decodeQuorumSession(m.Payload); cmd != nil {
 		if sessions == nil || cmd.quota() != sessions.limits {
 			return
 		}
@@ -353,7 +387,7 @@ func (f *quorumForward) worker(response bool) {
 					return
 				}
 				defer f.r.releaseProposal()
-				index, err := f.r.node.Publish(w.frame.Operation, w.frame.Payload, remaining)
+				index, err := f.propose(w.peer, w.frame, remaining)
 				code := quorumForwardTerminalError(err)
 				if (err != nil && code == "") || (err == nil && index == 0) {
 					return

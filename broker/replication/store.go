@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"sync"
 
 	"github.com/fhmq/hmq/v4/broker/storage"
@@ -37,7 +38,7 @@ type storeRecord struct {
 // The parent directory must exist. A failed append makes all operations except
 // Close unavailable, since the durable outcome may be uncertain. Reopening a
 // torn WAL fails closed using storage's corruption checks; it never repairs it.
-// WAL history is append-only; DeleteRange removes logical entries, not bytes.
+// DeleteRange removes logical entries; compact rewrites the remaining state.
 type Store struct {
 	mu          sync.RWMutex
 	wal         storeWAL
@@ -232,6 +233,47 @@ func (s *Store) DeleteRange(min, max uint64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.append(storeRecord{Version: 1, Op: "delete", Min: min, Max: max})
+}
+
+func (s *Store) compact() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.unavailable {
+		return ErrUnavailable
+	}
+	w, ok := s.wal.(interface{ Replace([][]byte) error })
+	if !ok {
+		return ErrStoreInvalid
+	}
+	keys := make([]uint64, 0, len(s.logs))
+	for i := range s.logs {
+		keys = append(keys, i)
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+	records := make([][]byte, 0, len(keys)+len(s.stable))
+	add := func(record storeRecord) error {
+		b, err := json.Marshal(record)
+		if err != nil {
+			return err
+		}
+		records = append(records, b)
+		return nil
+	}
+	for _, i := range keys {
+		if err := add(storeRecord{Version: 1, Op: "logs", Logs: []raft.Log{s.logs[i]}}); err != nil {
+			return err
+		}
+	}
+	for key, value := range s.stable {
+		if err := add(storeRecord{Version: 1, Op: "set", Key: []byte(key), Value: value}); err != nil {
+			return err
+		}
+	}
+	if err := w.Replace(records); err != nil {
+		s.unavailable = true
+		return err
+	}
+	return nil
 }
 
 func (s *Store) Set(key, value []byte) error {

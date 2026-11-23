@@ -2,6 +2,7 @@ package broker
 
 import (
 	stdjson "encoding/json"
+	"errors"
 	"sync"
 	"time"
 
@@ -82,66 +83,132 @@ type quorumSessionResult struct {
 	err     error
 }
 
-// The local view is rebuilt from applied Raft entries, including entries
-// retained by a snapshot. No independently writable session WAL exists here.
+// The local view is rebuilt from the checkpoint and retained Raft suffix.
 type quorumSessions struct {
 	*sessionstore.Store
 	r       *quorumRuntime
 	limits  sessionstore.Limits
 	mu      sync.Mutex
 	index   uint64
+	floor   uint64
 	results map[uint64]quorumSessionResult
+}
+
+func applySessionEntry(store *sessionstore.Store, entry replication.Entry) (quorumSessionResult, error) {
+	var r quorumSessionResult
+	if cmd := decodeQuorumSession(entry.Payload); cmd != nil {
+		switch cmd.SessionOp {
+		case "put":
+			r.version, r.err = store.Put(cmd.ID, cmd.Version, cmd.State)
+		case "apply":
+			r.version, r.err = store.ApplyLimited(cmd.ID, cmd.Version, *cmd.Batch, cmd.quota())
+		case "receive":
+			r.err = store.ReceiveLimited(cmd.ID, cmd.Version, cmd.PacketID, *cmd.Message, cmd.Maximum, cmd.quota())
+		case "release":
+			r.message, r.found, r.err = store.ReleaseLimited(cmd.ID, cmd.Version, cmd.PacketID, *cmd.Time, cmd.quota())
+		case "publish":
+			r.err = store.Fanout(*cmd.Message, cmd.quota())
+			if r.err == nil {
+				r.message = *cmd.Message
+			}
+		}
+		return r, nil
+	}
+	var p clusterPublish
+	if err := stdjson.Unmarshal(entry.Payload, &p); err != nil || p.Topic == "" {
+		return r, replication.ErrInvalid
+	}
+	return r, store.Fanout(sessionstore.Message{Topic: p.Topic, Payload: p.Payload, QoS: p.QoS, Metadata: p.Metadata, QueuedAt: p.QueuedAt}, sessionstore.Limits{})
+}
+
+func compactSessions(previous []byte, entries []replication.Entry) ([]byte, error) {
+	store := sessionstore.NewReplica()
+	if len(previous) != 0 {
+		if err := store.RestoreCheckpoint(previous); err != nil {
+			return nil, err
+		}
+	}
+	for _, entry := range entries {
+		if _, err := applySessionEntry(store, entry); err != nil {
+			return nil, err
+		}
+	}
+	if len(entries) == 0 && len(previous) != 0 {
+		return previous, nil // Validation during snapshot restore.
+	}
+	return store.Checkpoint()
+}
+
+func (s *quorumSessions) restoreApplied() error {
+	_, _, err := s.advance(s.r.node.HistoryTip())
+	if errors.Is(err, replication.ErrCompacted) {
+		// The requested tip was replaced by a newer checkpoint during
+		// recovery; advance already installed that checkpoint.
+		return nil
+	}
+	return err
 }
 
 func (s *quorumSessions) advance(through uint64) (quorumSessionResult, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for s.index < through {
-		entries, err := s.r.node.Entries(s.index, 64)
-		if err != nil || len(entries) == 0 {
-			return quorumSessionResult{}, false, err
+	for {
+		floor, checkpoint, entries := s.r.node.History(s.index, 64)
+		if len(checkpoint) != 0 {
+			if err := s.Store.RestoreCheckpoint(checkpoint); err != nil {
+				return quorumSessionResult{}, false, err
+			}
+			s.index = floor
+		}
+		if floor > s.floor {
+			for index := range s.results {
+				if index <= floor {
+					delete(s.results, index)
+				}
+			}
+			s.floor = floor
+		}
+		if through != 0 && through <= floor {
+			return quorumSessionResult{}, false, replication.ErrCompacted
+		}
+		if s.index >= through {
+			return s.results[through], true, nil
+		}
+		if len(entries) == 0 {
+			return quorumSessionResult{}, false, nil
 		}
 		for _, e := range entries {
 			if e.Index > through {
 				return quorumSessionResult{}, false, replication.ErrInvalid
 			}
-			if cmd := decodeQuorumSession(e.Payload); cmd != nil {
-				var r quorumSessionResult
-				switch cmd.SessionOp {
-				case "put":
-					r.version, r.err = s.Store.Put(cmd.ID, cmd.Version, cmd.State)
-				case "apply":
-					r.version, r.err = s.Store.ApplyLimited(cmd.ID, cmd.Version, *cmd.Batch, cmd.quota())
-				case "receive":
-					r.err = s.Store.ReceiveLimited(cmd.ID, cmd.Version, cmd.PacketID, *cmd.Message, cmd.Maximum, cmd.quota())
-				case "release":
-					r.message, r.found, r.err = s.Store.ReleaseLimited(cmd.ID, cmd.Version, cmd.PacketID, *cmd.Time, cmd.quota())
-				case "publish":
-					r.err = s.Store.Fanout(*cmd.Message, cmd.quota())
-					if r.err == nil {
-						r.message = *cmd.Message
-					}
-				}
-				s.results[e.Index] = r
-			} else {
-				var p clusterPublish
-				if err := stdjson.Unmarshal(e.Payload, &p); err != nil || p.Topic == "" {
-					return quorumSessionResult{}, false, replication.ErrInvalid
-				}
-				if err := s.Store.Fanout(sessionstore.Message{Topic: p.Topic, Payload: p.Payload, QoS: p.QoS, Metadata: p.Metadata, QueuedAt: p.QueuedAt}, sessionstore.Limits{}); err != nil {
-					return quorumSessionResult{}, false, err
-				}
+			outcome, err := applySessionEntry(s.Store, e)
+			if err != nil {
+				return quorumSessionResult{}, false, err
 			}
+			s.results[e.Index] = outcome
 			s.index = e.Index
 			if e.Index == through {
 				break
 			}
 		}
 	}
-	return s.results[through], true, nil
 }
 
 func (s *quorumSessions) commit(c quorumSessionCommand) (quorumSessionResult, error) {
+	until := time.Now().Add(6 * time.Second)
+	for {
+		result, err := s.commitOnce(c)
+		// A newly elected leader can apply a recovered checkpoint while the
+		// initial CONNECT barrier is in flight. Only a read barrier can be
+		// retried with a new operation ID without an uncertain side effect.
+		if c.SessionOp != "barrier" || !errors.Is(err, replication.ErrCompacted) || !time.Now().Before(until) {
+			return result, err
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func (s *quorumSessions) commitOnce(c quorumSessionCommand) (quorumSessionResult, error) {
 	if s.limits.Enabled() {
 		c.Quota = &s.limits
 	}

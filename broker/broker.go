@@ -334,6 +334,10 @@ func NewBrokerWithSessionStorage(config *Config, backend SessionStorage) (*Broke
 				s := &quorumSessions{Store: sessionstore.NewReplica(), r: b.quorumRuntime, limits: config.SessionQuota, results: make(map[uint64]quorumSessionResult)}
 				b.quorumRuntime.sessions = s
 				b.sessionLog = s
+				if err := s.restoreApplied(); err != nil {
+					b.Close()
+					return nil, err
+				}
 			}
 		}
 		sender := &runtimeNodeSender{}
@@ -393,6 +397,7 @@ func NewBrokerWithSessionStorage(config *Config, backend SessionStorage) (*Broke
 			b.quorumRuntime.startConsumer(c.NodeID, c.ClusterID, b.publishCommittedLocal)
 			if b.quorumRuntime.sessions != nil {
 				b.launch(b.pumpQuorumSessions)
+				b.launch(func() { b.quorumRuntime.maintainHistory(b.ctx) })
 			}
 		}
 	}

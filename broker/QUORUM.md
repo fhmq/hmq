@@ -18,10 +18,10 @@ publishers without successful acknowledgment if forwarding cannot commit. QoS 0 
 but MQTT QoS 0 has no acknowledgment with which to report success to the caller.
 
 Every node polls its own applied `Entries` in log order, delivers locally without
-forwarding, then fsyncs the index in `delivery.wal`. The WAL is bound to node and
-cluster identity. Delivery errors retry the current entry; poisoned cursor writes
-stop the consumer until restart. Monitoring exposes the cursor and failure flag.
-The kernel has fixed capacity and no retention/compaction protocol.
+forwarding, then fsyncs the completed batch's index in `delivery.wal`. The WAL
+is bound to node and cluster identity. Delivery errors retry the failed entry;
+poisoned cursor writes stop the consumer until restart. Monitoring exposes the
+cursor and failure flag.
 
 Shutdown and initialization rollback close Raft and the network transport
 concurrently, interrupting in-flight RPCs instead of waiting for size-scaled
@@ -44,7 +44,7 @@ queue or exactly-once MQTT implementation. The committed log and local cursor mu
 be backed up/restored as one node's state, never independently reset or mixed.
 
 With `sessionPersistence`, the same ordered journal carries session commands.
-The materialized view is rebuilt from committed entries and does not depend on
+The materialized view is rebuilt from a checkpoint plus a committed suffix and does not depend on
 the transient delivery cursor. A successful inbound PUBREC follows the commit of
 the original message; PUBCOMP follows the commit that removes it and enqueues
 durable subscriber deliveries. Outbound PUBLISH/PUBREL phase and Packet ID are
@@ -57,8 +57,30 @@ Use the same quota on all members; changing it requires a coordinated
 restart, since mismatched quota profiles do not form a Raft quorum.
 The admission policy for each command is recorded in the log so replay
 preserves past outcomes even after configuration changes. Rejected
-commands can still occupy history space. There is no history reclamation;
-transient routing remains subject to cursor replay.
+commands occupy history until reclamation. Transient routing remains subject
+to cursor replay, including when a crash interrupts a batch.
+
+## Replicated history reclamation
+
+With session persistence, members report their own fsynced delivery cursors
+over authenticated forwarding. Raft folds only the prefix covered by **every**
+member into a deterministic checkpoint. This preserves session version
+tombstones, subscriptions, queued data, and inbound and outbound handshake
+phases. The snapshot also contains the suffix a slow member still needs, so
+installing it does not skip incomplete delivery or re-enqueue durable items.
+The broker waits for a reclaimable prefix of 128 entries or 4 MiB, then
+checkpoints and rewrites the remaining Raft WAL after a durable snapshot. The
+WAL records the required snapshot index and recovery fails closed if that
+snapshot is missing or invalid. Back up the snapshots and both WALs together.
+
+A member that stays offline or stops consuming can pin history at the fixed
+capacity until it catches up; quorum availability alone cannot safely remove
+its delivery suffix. Checkpoints over 128 MiB fail without deleting history.
+Watch `compactedThrough`, `compactionFailed` and entry/byte usage under
+`GET /api/v1/capacity`. This recycles application history; it is not a global
+disk quota or session expiry. The node-local delivery cursor WAL is append-only.
+Compact snapshots and their peer protocol require a coordinated upgrade;
+older binaries must not reopen a compacted data directory.
 
 Retained messages/storage, shared subscriptions, will messages, standalone
 session logs, bridge plugins, directed delivery, reserved `$` publication topics

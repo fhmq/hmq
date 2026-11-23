@@ -18,7 +18,13 @@ func logMQTTConnect(t *testing.T, b *Broker, id string, present bool) (net.Conn,
 	sendTestConnect(t, peer, id, false)
 	p, err := packets.ReadPacket(peer)
 	if err != nil {
-		t.Fatal(err)
+		peer.Close()
+		select {
+		case cause := <-done:
+			t.Fatalf("read CONNACK: %v (broker: %v)", err, cause)
+		case <-time.After(2 * time.Second):
+			t.Fatal(err)
+		}
 	}
 	if a, ok := p.(*packets.ConnackPacket); !ok || a.SessionPresent != present {
 		t.Fatalf("CONNACK: %#v", p)
