@@ -210,7 +210,11 @@ func TestQuorumCheckpointRestoresHandshakeAndQueue(t *testing.T) {
 	}
 	survivors := []*Broker{nodes[slow], nodes[3-leader-slow]}
 	next := survivors[quorumLeader(t, survivors)]
-	wait(func() bool { return next.quorumRuntime.node.Floor() > floor }, "new leader did not reclaim caught-up suffix")
+	// The stopped leader may not yet have reported its final cursor. Its
+	// report can pin compaction, but must not prevent majority progress.
+	if _, err := next.quorumRuntime.sessions.commit(quorumSessionCommand{SessionOp: "barrier"}); err != nil {
+		t.Fatalf("surviving majority cannot commit: %v", err)
+	}
 
 	for _, node := range survivors {
 		node.Close()
@@ -219,6 +223,7 @@ func TestQuorumCheckpointRestoresHandshakeAndQueue(t *testing.T) {
 		open(i)
 	}
 	b = nodes[quorumLeader(t, nodes)]
+	wait(func() bool { return b.quorumRuntime.node.Floor() > floor }, "recovered members did not reclaim caught-up suffix")
 	sub, done = logMQTTConnect(t, b, "checkpoint-sub", true)
 	if p, ok := read(sub).(*packets.PubrelPacket); !ok || p.MessageID != rec.MessageID {
 		t.Fatalf("recovered PUBREL: %#v", p)
